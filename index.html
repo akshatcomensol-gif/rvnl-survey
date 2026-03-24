@@ -3807,7 +3807,7 @@ function renderFinance() {
 
   h += '<div class="itabs" id="fin-tabs">';
   tabs.forEach(function(t, i) {
-    h += '<button class="itab'+(i===0?" active":"")+'" onclick="swFinTab(''+t.id+'',this)">'+t.label+'</button>';
+    h += "<button class=\"itab"+(i===0?" active":"")+"\" onclick=\"swFinTab('"+t.id+"',this)\">" + t.label + "</button>";
   });
   h += '</div>';
 
@@ -3844,7 +3844,7 @@ function renderFinFunds() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Fund Pool — RVNL Project</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal('fund')">+ Add Fund</button></div>';
+  h += '<button class="btn btn-gold" onclick="openFinModal(\"fund\")">+ Add Fund</button></div>';
   h += '<div class="stats" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:14px">';
   h += '<div class="stat" style="--ac:var(--ok)"><div class="sv">₹'+fmtAmt(total)+'</div><div class="sl">Total Received</div></div>';
   h += '<div class="stat" style="--ac:var(--red)"><div class="sv">₹'+fmtAmt(totalPaid)+'</div><div class="sl">Total Paid Out</div></div>';
@@ -3858,7 +3858,7 @@ function renderFinFunds() {
     funds.slice().reverse().forEach(function(f) {
       h += '<tr><td>'+f.date+'</td><td style="color:var(--ok);font-weight:700">₹'+fmtAmt(f.amount)+'</td>';
       h += '<td>'+f.source+'</td><td style="font-size:11px">'+f.ref+'</td><td style="font-size:11px">'+f.remarks+'</td>';
-      h += '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;color:var(--red)" onclick="delFin('funds',''+f._fid+'')">Del</button></td></tr>';
+      h += '<td><button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;color:var(--red)" onclick=\"delFin(\x27funds\x27,\x27"+f._fid+"\x27)\">Del</button></td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -3871,7 +3871,7 @@ function renderFinVendors() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Vendor Assignment — Block wise</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal('vendor')">+ Assign Vendor</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"vendor\")">+ Assign Vendor</button>';
   h += '</div>';
   var vendors = financeData.vendors.filter(function(v){return !v.deleted;});
   if (vendors.length === 0) {
@@ -3889,8 +3889,8 @@ function renderFinVendors() {
       h += '<td>'+gstBadge+'</td>';
       h += '<td><span style="color:'+statusColor+';font-size:11px;font-weight:700">'+v.status+'</span></td>';
       h += '<td style="display:flex;gap:4px">';
-      if (v.status==="pending" && cu.role==="head") h += '<button class="btn btn-green" style="padding:3px 8px;font-size:11px" onclick="approveVendor(''+v._fid+'')">Approve</button>';
-      if (cu.role==="head") h += '<button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;color:var(--red)" onclick="delFin('vendors',''+v._fid+'')">Del</button>';
+      if (v.status==="pending" && cu.role==="head") h += '<button class="btn btn-green" style="padding:3px 8px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Approve</button>';
+      if (cu.role==="head") h += '<button class="btn btn-ghost" style="padding:3px 8px;font-size:11px;color:var(--red)" onclick=\"delFin(\x27vendors\x27,\x27"+v._fid+"\x27)\">Del</button>';
       h += '</td></tr>';
     });
     h += '</tbody></table></div>';
@@ -3904,7 +3904,7 @@ function renderFinPayments() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Payment Requests</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal('payment')">+ New Request</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"payment\")">+ New Request</button>';
   h += '</div>';
 
   var payments = financeData.payments.filter(function(p){return !p.deleted;});
@@ -3940,14 +3940,14 @@ function renderFinPayments() {
       h += '<td><span style="color:'+statusColor+';font-size:11px;font-weight:700">'+p.status.toUpperCase()+'</span></td>';
       h += '<td><div style="display:flex;gap:3px;flex-wrap:wrap">';
       if (p.status==="pending" && cu.role==="head") {
-        h += '<button class="btn btn-green" style="padding:3px 7px;font-size:11px" onclick="approvePayment(''+p._fid+'')">Approve</button>';
-        h += '<button class="btn btn-red" style="padding:3px 7px;font-size:11px" onclick="rejectPayment(''+p._fid+'')">Reject</button>';
+        h += '<button class="btn btn-green" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Approve</button>';
+        h += '<button class="btn btn-red" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Reject</button>';
       }
       if (p.status==="approved" && cu.role==="finance") {
-        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick="markPaid(''+p._fid+'')">Mark Paid</button>';
+        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Mark Paid</button>';
       }
       if (p.status==="approved" && cu.role==="head") {
-        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick="markPaid(''+p._fid+'')">Mark Paid</button>';
+        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Mark Paid</button>';
       }
       h += '</div></td></tr>';
     });
@@ -3962,7 +3962,7 @@ function renderFinGPON() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">GPON Survey Tracking</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal('gpon')">+ Add Entry</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"gpon\")">+ Add Entry</button>';
   h += '</div>';
   h += '<div class="bi">GPON survey: Rs 100/GP for vendor team. Inhouse = separate expense.</div>';
   var entries = financeData.gponSurvey.filter(function(g){return !g.deleted;});
@@ -3995,7 +3995,7 @@ function renderFinExpenses() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Expenses Tracker</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal('expense')">+ Add Expense</button>';
+  h += '<button class="btn btn-gold" onclick="openFinModal(\"expense\")">+ Add Expense</button>';
   h += '</div>';
 
   var exp = financeData.expenses.filter(function(e){return !e.deleted;});
@@ -4039,7 +4039,7 @@ function renderFinTA() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">TA / DA — Site Supervisor</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal('ta')">+ Add Reading</button>';
+  h += '<button class="btn btn-gold" onclick="openFinModal(\"ta\")">+ Add Reading</button>';
   h += '</div>';
   h += '<div class="bi">TA calculated @ Rs 2.5/km from odometer readings. Anuj checks → Akshat approves.</div>';
 
@@ -4077,14 +4077,14 @@ function renderFinTA() {
       h += '<td><span style="color:'+statusColor+';font-size:11px;font-weight:700">'+t.status.toUpperCase()+'</span></td>';
       h += '<td><div style="display:flex;gap:3px">';
       if (t.status==="pending" && cu.role==="manager") {
-        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick="taManagerCheck(''+t._fid+'')">Check</button>';
+        h += '<button class="btn btn-blue" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Check</button>';
       }
       if (t.status==="pending" && cu.role==="manager") {
-        h += '<button class="btn btn-ghost" style="padding:3px 7px;font-size:11px" onclick="taManagerAmend(''+t._fid+'')">Amend</button>';
+        h += '<button class="btn btn-ghost" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Amend</button>';
       }
       if ((t.status==="checked"||t.status==="pending") && cu.role==="head") {
-        h += '<button class="btn btn-green" style="padding:3px 7px;font-size:11px" onclick="taApprove(''+t._fid+'')">Approve</button>';
-        h += '<button class="btn btn-red" style="padding:3px 7px;font-size:11px" onclick="taReject(''+t._fid+'')">Reject</button>';
+        h += '<button class="btn btn-green" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Approve</button>';
+        h += '<button class="btn btn-red" style="padding:3px 7px;font-size:11px" onclick=\\"\1\x27\2\x27)\">Reject</button>';
       }
       h += '</div></td></tr>';
     });
@@ -4194,7 +4194,7 @@ function buildVendorForm() {
   '<div class="fgrp"><label class="flbl">Contact No.</label><input class="finp" id="fv-contact" placeholder="Mobile number"></div></div>'+
   '<div class="frow"><div class="fgrp"><label class="flbl">Rate (Rs)</label><input class="finp" type="number" id="fv-rate" placeholder="e.g. 100"></div>'+
   '<div class="fgrp"><label class="flbl">Unit</label><select class="fsel" id="fv-unit"><option value="GP">per GP</option><option value="km">per km</option><option value="RKM">per RKM</option><option value="lump">Lumpsum</option></select></div></div>'+
-  '<div class="frow"><div class="fgrp"><label class="flbl">GST Applicable?</label><select class="fsel" id="fv-gst" onchange="document.getElementById('fv-gstpct').style.display=this.value==='yes'?'block':'none'"><option value="no">No GST</option><option value="yes">Yes - GST Extra</option></select></div>'+
+  '<div class="frow"><div class="fgrp"><label class="flbl">GST Applicable?</label><select class="fsel" id="fv-gst" onchange="document.getElementById(\x27fv-gstpct\x27).style.display=this.value===\x27yes\x27?\x27block\x27:\x27none\x27"><option value="no">No GST</option><option value="yes">Yes - GST Extra</option></select></div>'+
   '<div class="fgrp" id="fv-gstpct" style="display:none"><label class="flbl">GST %</label><select class="fsel" id="fv-gstval"><option value="18">18%</option><option value="12">12%</option><option value="5">5%</option></select></div></div>'+
   '<div class="frow f1"><div class="fgrp"><label class="flbl">Remarks</label><input class="finp" id="fv-remarks" placeholder="Any notes about this vendor"></div></div>'+
   (cu.role==="head"?'<div class="bo">Aap approve kar sakte ho seedha.</div>':'')+
@@ -4248,7 +4248,7 @@ function buildExpenseForm() {
   '<div class="fgrp"><label class="flbl">Block / Site</label><select class="fsel" id="fe-block">'+blockOpsHtml+'</select></div></div>'+
   '<div class="frow"><div class="fgrp"><label class="flbl">Amount (Rs) *</label><input class="finp" type="number" id="fe-amount" placeholder="0"></div>'+
   '<div class="fgrp"><label class="flbl">Frequency</label><select class="fsel" id="fe-freq"><option value="one-time">One-time</option><option value="monthly">Monthly</option><option value="daily">Daily</option><option value="per-pit">Per Pit</option></select></div></div>'+
-  '<div class="frow"><div class="fgrp"><label class="flbl">GST?</label><select class="fsel" id="fe-gst" onchange="document.getElementById('fe-gstpct').style.display=this.value==='yes'?'block':'none'"><option value="no">No GST</option><option value="yes">With GST</option></select></div>'+
+  '<div class="frow"><div class="fgrp"><label class="flbl">GST?</label><select class="fsel" id="fe-gst" onchange="document.getElementById(\x27fe-gstpct\x27).style.display=this.value===\x27yes\x27?\x27block\x27:\x27none\x27"><option value="no">No GST</option><option value="yes">With GST</option></select></div>'+
   '<div class="fgrp" id="fe-gstpct" style="display:none"><label class="flbl">GST %</label><select class="fsel" id="fe-gstval"><option value="18">18%</option><option value="12">12%</option></select></div></div>'+
   '<div class="btns"><button class="btn btn-gold" onclick="saveExpense()">Save Expense</button><button class="btn btn-ghost" onclick="closeFinModal()">Cancel</button></div>';
 }
