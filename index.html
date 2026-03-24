@@ -901,7 +901,7 @@ function gp(page) {
   else if (page === "reports") { el.innerHTML = renderReports(); }
   else if (page === "manual") { el.innerHTML = renderManual(); }
   else if (page === "gismap") { el.innerHTML = renderGISMap(); setTimeout(initGISMap, 200); }
-  else if (page === "finance") { el.innerHTML = renderFinance(); }
+  else if (page === "finance") { try { el.innerHTML = renderFinance(); } catch(e) { el.innerHTML = "<div class=\"card\"><div class=\"be\">Finance Error: " + e.message + "</div></div>"; console.error("Finance error:", e); } }
   else if (page === "users")  { el.innerHTML = renderUsers(); }
 }
 
