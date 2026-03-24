@@ -3807,7 +3807,7 @@ function renderFinance() {
 
   h += '<div class="itabs" id="fin-tabs">';
   tabs.forEach(function(t, i) {
-    h += "<button class=\"itab"+(i===0?" active":"")+"\" onclick=\"swFinTab('"+t.id+"',this)\">" + t.label + "</button>";
+    h += '<button class="itab'+(i===0?' active':'')+'" data-tab="'+t.id+'">'+t.label+'</button>';
   });
   h += '</div>';
 
@@ -3822,15 +3822,32 @@ function swFinTab(tabId, btn) {
   try {
     document.querySelectorAll("#fin-tabs .itab").forEach(function(b){ b.classList.remove("active"); });
     if(btn) btn.classList.add("active");
-    var content = renderFinTab(tabId);
+    var tabContent = renderFinTab(tabId);
     var el = document.getElementById("fin-content");
-    if(el) el.innerHTML = content;
+    if(el) el.innerHTML = tabContent;
   } catch(e) {
     var el = document.getElementById("fin-content");
-    if(el) el.innerHTML = "<div class=\"be\">Tab Error: " + e.message + "<br><small>" + e.stack + "</small></div>";
+    if(el) el.innerHTML = "<div class=\"be\">Tab Error: " + e.message + "</div>";
     console.error("swFinTab error:", e);
   }
 }
+
+
+// Event delegation for finance modal buttons
+document.addEventListener("click", function(e) {
+  var btn = e.target.closest("[data-modal]");
+  if (!btn) return;
+  openFinModal(btn.getAttribute("data-modal"));
+});
+
+// Event delegation for finance tabs - handles dynamically rendered buttons
+document.addEventListener("click", function(e) {
+  var btn = e.target.closest("[data-tab]");
+  if (!btn) return;
+  var tabId = btn.getAttribute("data-tab");
+  if (!tabId || !tabId.startsWith("fin-")) return;
+  swFinTab(tabId, btn);
+});
 
 function renderFinTab(tabId) {
   if (tabId === "fin-funds")    return renderFinFunds();
@@ -3852,7 +3869,7 @@ function renderFinFunds() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Fund Pool — RVNL Project</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal(\"fund\")">+ Add Fund</button></div>';
+  h += '<button class="btn btn-gold" data-modal="fund">+ Add Fund</button></div>';
   h += '<div class="stats" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:14px">';
   h += '<div class="stat" style="--ac:var(--ok)"><div class="sv">₹'+fmtAmt(total)+'</div><div class="sl">Total Received</div></div>';
   h += '<div class="stat" style="--ac:var(--red)"><div class="sv">₹'+fmtAmt(totalPaid)+'</div><div class="sl">Total Paid Out</div></div>';
@@ -3879,7 +3896,7 @@ function renderFinVendors() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Vendor Assignment — Block wise</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"vendor\")">+ Assign Vendor</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" data-modal="vendor">+ Assign Vendor</button>';
   h += '</div>';
   var vendors = financeData.vendors.filter(function(v){return !v.deleted;});
   if (vendors.length === 0) {
@@ -3912,7 +3929,7 @@ function renderFinPayments() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Payment Requests</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"payment\")">+ New Request</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" data-modal="payment">+ New Request</button>';
   h += '</div>';
 
   var payments = financeData.payments.filter(function(p){return !p.deleted;});
@@ -3970,7 +3987,7 @@ function renderFinGPON() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">GPON Survey Tracking</div>';
-  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" onclick="openFinModal(\"gpon\")">+ Add Entry</button>';
+  if (["head","manager"].includes(cu.role)) h += '<button class="btn btn-gold" data-modal="gpon">+ Add Entry</button>';
   h += '</div>';
   h += '<div class="bi">GPON survey: Rs 100/GP for vendor team. Inhouse = separate expense.</div>';
   var entries = financeData.gponSurvey.filter(function(g){return !g.deleted;});
@@ -4003,7 +4020,7 @@ function renderFinExpenses() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">Expenses Tracker</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal(\"expense\")">+ Add Expense</button>';
+  h += '<button class="btn btn-gold" data-modal="expense">+ Add Expense</button>';
   h += '</div>';
 
   var exp = financeData.expenses.filter(function(e){return !e.deleted;});
@@ -4047,7 +4064,7 @@ function renderFinTA() {
   var h = '<div class="card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">';
   h += '<div class="ct">TA / DA — Site Supervisor</div>';
-  h += '<button class="btn btn-gold" onclick="openFinModal(\"ta\")">+ Add Reading</button>';
+  h += '<button class="btn btn-gold" data-modal="ta">+ Add Reading</button>';
   h += '</div>';
   h += '<div class="bi">TA calculated @ Rs 2.5/km from odometer readings. Anuj checks → Akshat approves.</div>';
 
