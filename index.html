@@ -885,10 +885,11 @@ function getV(id) { var e = document.getElementById(id); return e ? e.value : ""
 // ====================================================
 function gp(page) {
   var tabs = document.querySelectorAll(".navtab");
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove("active");
-  var pages = ["dashboard","import","submit","manual","review","blocks","attendance","reports","gismap","finance","users"];
-  var idx = pages.indexOf(page);
-  if (idx >= 0 && tabs[idx]) tabs[idx].classList.add("active");
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.remove("active");
+    var oc = tabs[i].getAttribute("onclick") || "";
+    if (oc.indexOf("gp('"+page+"')") >= 0) tabs[i].classList.add("active");
+  }
   var el = document.getElementById("page");
   if (!el) return;
   if (page === "dashboard")   { el.innerHTML = renderDash(); }
