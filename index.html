@@ -3819,9 +3819,17 @@ function renderFinance() {
 }
 
 function swFinTab(tabId, btn) {
-  document.querySelectorAll("#fin-tabs .itab").forEach(function(b){ b.classList.remove("active"); });
-  btn.classList.add("active");
-  document.getElementById("fin-content").innerHTML = renderFinTab(tabId);
+  try {
+    document.querySelectorAll("#fin-tabs .itab").forEach(function(b){ b.classList.remove("active"); });
+    if(btn) btn.classList.add("active");
+    var content = renderFinTab(tabId);
+    var el = document.getElementById("fin-content");
+    if(el) el.innerHTML = content;
+  } catch(e) {
+    var el = document.getElementById("fin-content");
+    if(el) el.innerHTML = "<div class=\"be\">Tab Error: " + e.message + "<br><small>" + e.stack + "</small></div>";
+    console.error("swFinTab error:", e);
+  }
 }
 
 function renderFinTab(tabId) {
