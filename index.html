@@ -2361,9 +2361,22 @@ function initAtt() {
 
 function punchIn() {
   punchedIn = true; punchStart = new Date();
-  var rec = {name:cu.name, role:cu.task, date:new Date().toLocaleDateString("en-IN"),
-    punchIn:punchStart.toLocaleTimeString("en-IN"), punchOut:null, duration:null};
+  var rec = {
+    name: cu.name, role: cu.role,
+    date: new Date().toISOString().split("T")[0],
+    dateDisplay: new Date().toLocaleDateString("en-IN"),
+    punchIn: punchStart.toLocaleTimeString("en-IN"),
+    punchInTs: punchStart.toISOString(),
+    punchOut: null, duration: null,
+    type: "punchin"
+  };
   attendanceLog.push(rec);
+  // Save to Firebase fin_attendance
+  if (FB_ENABLED && window._db) {
+    window._dbl.addDoc(window._dbl.collection(window._db, "fin_attendance"), rec)
+      .then(function(r) { rec._fid = r.id; })
+      .catch(function(e) { console.log("punchIn save err:", e); });
+  }
   var btn = document.getElementById("att-btn");
   var stat = document.getElementById("att-stat");
   if (btn) btn.innerHTML = '<button class="btn btn-red" style="font-size:18px;padding:14px 40px;border-radius:10px" onclick="punchOut()">PUNCH OUT</button>';
@@ -2392,6 +2405,30 @@ function punchOut() {
   showToast("Punched out. Duration: " + durStr);
   var log = document.getElementById("att-log");
   if (log) log.innerHTML = buildAttLog();
+  // Update Firebase record
+  var lastRec = null;
+  for (var j = attendanceLog.length-1; j >= 0; j--) {
+    if (attendanceLog[j].name === cu.name && attendanceLog[j].punchOut) {
+      lastRec = attendanceLog[j]; break;
+    }
+  }
+  if (lastRec && lastRec._fid && FB_ENABLED && window._db) {
+    window._dbl.setDoc(
+      window._dbl.doc(window._db, "fin_attendance", lastRec._fid),
+      { punchOut: lastRec.punchOut, duration: durStr, type: "punchout" },
+      { merge: true }
+    ).catch(function(e){ console.log("punchOut update err:", e); });
+  } else if (FB_ENABLED && window._db) {
+    // Save as new complete record
+    window._dbl.addDoc(window._dbl.collection(window._db, "fin_attendance"), {
+      name: cu.name, role: cu.role,
+      date: new Date().toISOString().split("T")[0],
+      dateDisplay: new Date().toLocaleDateString("en-IN"),
+      punchIn: punchStart ? punchStart.toLocaleTimeString("en-IN") : "-",
+      punchOut: end.toLocaleTimeString("en-IN"),
+      duration: durStr, type: "punchout"
+    }).catch(function(e){ console.log("punchOut save err:", e); });
+  }
 }
 
 // ====================================================
@@ -4405,8 +4442,9 @@ function rTA() {
 // TAB 7 — ATTENDANCE
 // ============================================================
 function rAtt() {
-  var records = FIN.attendance.filter(function(a){return !a.deleted;});
-  // Head sees everyone, others see only self
+  // FIN.attendance loads from fin_attendance collection (same as punchIn saves)
+  var records = FIN.attendance ? FIN.attendance.filter(function(a){return !a.deleted;}) : [];
+  // Head/manager sees everyone, others see only self
   if (cu.role !== "head" && cu.role !== "manager") {
     records = records.filter(function(a){return a.name === cu.name;});
   }
