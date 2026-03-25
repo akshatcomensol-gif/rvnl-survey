@@ -3944,7 +3944,7 @@ window._fbReady = function() {
   setTimeout(loadFieldReports, 2500);
   setTimeout(loadAlerts, 3000);
   setTimeout(loadInvoices, 3500);
-  setTimeout(loadSessionLogs, 4000);
+  setTimeout(loadSessionLogs, 1500);
 };
 
 // ── Helpers ──
@@ -5815,16 +5815,28 @@ function loadSessionLogs() {
     _sessionLogAtt = [];
     snap.forEach(function(d) {
       var data = d.data();
+      // sessionLogs fields: user, role, loginTime, logoutTime, durationStr, durationSec
+      var loginT = data.loginTime || data.punchIn || "";
+      var logoutT = data.logoutTime || data.punchOut || "";
+      var dur = data.durationStr || data.duration || data.sessionDuration || "";
+      // Extract date from loginTime "25/03/2026, 10:24:59 am"
+      var dateStr = "";
+      if (data.loginTime && data.loginTime.includes(",")) {
+        var parts = data.loginTime.split(",")[0].trim(); // "25/03/2026"
+        var dp = parts.split("/");
+        if (dp.length === 3) dateStr = dp[2] + "-" + dp[1] + "-" + dp[0]; // "2026-03-25"
+      }
+      if (!dateStr) dateStr = new Date().toISOString().split("T")[0];
       _sessionLogAtt.push({
         _fid: "sl_" + d.id,
         name: data.user || data.name || data.userName || "Unknown",
         role: data.role || data.userRole || "",
-        date: data.date || new Date().toISOString().split("T")[0],
-        dateDisplay: data.date || "",
-        punchIn: data.loginTime || data.punchIn || data.checkIn || "",
-        punchOut: data.logoutTime || data.punchOut || data.checkOut || "",
-        duration: data.duration || data.sessionDuration || "",
-        type: "punchout",
+        date: dateStr,
+        dateDisplay: data.loginTime ? data.loginTime.split(",")[0] : dateStr,
+        punchIn: loginT,
+        punchOut: logoutT,
+        duration: dur,
+        type: dur ? "punchout" : "punchin",
         source: "sessionLogs"
       });
     });
