@@ -2328,9 +2328,21 @@ function renderAtt() {
 }
 
 function buildAttLog() {
-  var h = '<table class="tbl"><thead><tr><th>Name</th><th>In</th><th>Out</th><th>Status</th></tr></thead><tbody>';
-  for (var i = 0; i < attendanceLog.length; i++) {
-    var a = attendanceLog[i];
+  // Merge local + Firebase data for main attendance page
+  var allLogs = attendanceLog.slice();
+  (_sessionLogAtt || []).forEach(function(s) {
+    var exists = allLogs.find(function(l){ return l._fid === s._fid; });
+    if (!exists) allLogs.push(s);
+  });
+  (FIN.attendance || []).forEach(function(s) {
+    var exists = allLogs.find(function(l){ return l._fid === s._fid; });
+    if (!exists) allLogs.push(s);
+  });
+
+  var h = '<table class="tbl"><thead><tr><th>Name</th><th>Date</th><th>In</th><th>Out</th><th>Duration</th><th>Status</th></tr></thead><tbody>';
+  if (!allLogs.length) return '<div class="bi">No attendance records yet.</div>';
+  for (var i = allLogs.length - 1; i >= 0; i--) {
+    var a = allLogs[i];
     h += '<tr><td><strong>' + a.name + '</strong></td><td>' + a.punchIn + '</td>';
     h += '<td>' + (a.punchOut || "-") + '</td>';
     h += '<td>' + (a.punchOut ? '<span class="tag tm">Done</span>' : '<span class="tag tg">Active</span>') + '</td></tr>';
@@ -3925,6 +3937,7 @@ window._fbReady = function() {
   setTimeout(loadFieldReports, 2500);
   setTimeout(loadAlerts, 3000);
   setTimeout(loadInvoices, 3500);
+  setTimeout(loadSessionLogs, 4000);
 };
 
 // ── Helpers ──
@@ -4442,11 +4455,12 @@ function rTA() {
 // TAB 7 — ATTENDANCE
 // ============================================================
 function rAtt() {
-  // FIN.attendance loads from fin_attendance collection (same as punchIn saves)
-  var records = FIN.attendance ? FIN.attendance.filter(function(a){return !a.deleted;}) : [];
+  // Merge fin_attendance (new) + sessionLogs (old) data
+  var records = (FIN.attendance || []).concat(_sessionLogAtt || []);
+  records = records.filter(function(a){ return !a.deleted; });
   // Head/manager sees everyone, others see only self
   if (cu.role !== "head" && cu.role !== "manager") {
-    records = records.filter(function(a){return a.name === cu.name;});
+    records = records.filter(function(a){ return a.name === cu.name; });
   }
 
   // Group by person-date
@@ -5780,6 +5794,38 @@ async function saveChangePwd() {
     document.getElementById("pwd-modal").classList.remove("open");
     showToast("Password changed (local only — sync when online)");
   }
+}
+
+
+
+// Load old attendance from sessionLogs collection
+var _sessionLogAtt = [];
+function loadSessionLogs() {
+  if (!FB_ENABLED || !window._db) return;
+  window._dbl.getDocs(
+    window._dbl.collection(window._db, "sessionLogs")
+  ).then(function(snap) {
+    _sessionLogAtt = [];
+    snap.forEach(function(d) {
+      var data = d.data();
+      // Convert sessionLog format to attendance format
+      _sessionLogAtt.push({
+        _fid: d.id,
+        name: data.user || data.name || "Unknown",
+        role: data.role || "",
+        date: data.date || (data.loginTime ? data.loginTime.split(",")[0] : ""),
+        punchIn: data.loginTime || data.punchIn || "",
+        punchOut: data.logoutTime || data.punchOut || "",
+        duration: data.duration || "",
+        type: "punchout"
+      });
+    });
+    // Refresh attendance tab if open
+    if (_curFinTab === "fin-att") refreshFinTab();
+    // Also refresh main attendance page
+    var log = document.getElementById("att-log");
+    if (log) log.innerHTML = buildAttLog ? buildAttLog() : "";
+  }).catch(function(e){ console.log("sessionLogs load err:", e); });
 }
 
 
