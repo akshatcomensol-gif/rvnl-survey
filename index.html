@@ -471,9 +471,10 @@ var USERS = [
 ];
 
 var ROLE_PWDS = {
-  field:"field@123", review:"review@123", gis:"ajay@123", manager:"anuj@123",
-  head:"akshat@123", rvnl:"rvnl@123", ie:"ie@123",
-  finance:"finance@123", supervisor:"super@123"
+  field:"field@123", review:"review@123", gis:"ajay@123",
+  manager:"anuj@123", head:"akshat@123", rvnl:"rvnl@123",
+  ie:"ie@123", finance:"finance@123", supervisor:"super@123",
+  dtp:"ajay@123"
 };
 
 var TLABELS = {
@@ -2694,8 +2695,14 @@ function exportExcel() {
 // ====================================================
 function renderUsers() {
   if (cu.role !== "head") return '<div class="be">This page is restricted to Project Head only.</div>';
-  var roles = ["field","review","dtp","head","rvnl"];
-  var rNames = {field:"Field Data Collection",review:"Survey Review & QC",dtp:"DTP & Shape File",head:"Project Head",rvnl:"RVNL / IE Viewer"};
+  var roles = ["field","review","gis","manager","head","rvnl","ie","finance","supervisor"];
+  var rNames = {
+    field:"Field Data Collection", review:"Survey Review & QC",
+    gis:"GIS & DTP", manager:"Field Manager",
+    head:"Project Head", rvnl:"RVNL / IE Viewer",
+    ie:"IE Inspector", finance:"Finance / Accounts",
+    supervisor:"Site Supervisor"
+  };
   var h = '<div class="card"><div class="ct">Firebase Cloud Storage</div>';
   h += FB_ENABLED
     ? '<div class="bo">Firebase CONNECTED. All submissions syncing to cloud in real-time.</div>'
@@ -5802,31 +5809,57 @@ async function saveChangePwd() {
 var _sessionLogAtt = [];
 function loadSessionLogs() {
   if (!FB_ENABLED || !window._db) return;
-  window._dbl.getDocs(
-    window._dbl.collection(window._db, "sessionLogs")
-  ).then(function(snap) {
+  // Load from sessionLogs (old punch data)
+  window._dbl.getDocs(window._dbl.collection(window._db, "sessionLogs"))
+  .then(function(snap) {
     _sessionLogAtt = [];
     snap.forEach(function(d) {
       var data = d.data();
-      // Convert sessionLog format to attendance format
       _sessionLogAtt.push({
-        _fid: d.id,
-        name: data.user || data.name || "Unknown",
-        role: data.role || "",
-        date: data.date || (data.loginTime ? data.loginTime.split(",")[0] : ""),
-        punchIn: data.loginTime || data.punchIn || "",
-        punchOut: data.logoutTime || data.punchOut || "",
-        duration: data.duration || "",
-        type: "punchout"
+        _fid: "sl_" + d.id,
+        name: data.user || data.name || data.userName || "Unknown",
+        role: data.role || data.userRole || "",
+        date: data.date || new Date().toISOString().split("T")[0],
+        dateDisplay: data.date || "",
+        punchIn: data.loginTime || data.punchIn || data.checkIn || "",
+        punchOut: data.logoutTime || data.punchOut || data.checkOut || "",
+        duration: data.duration || data.sessionDuration || "",
+        type: "punchout",
+        source: "sessionLogs"
       });
     });
-    // Refresh attendance tab if open
     if (_curFinTab === "fin-att") refreshFinTab();
-    // Also refresh main attendance page
     var log = document.getElementById("att-log");
-    if (log) log.innerHTML = buildAttLog ? buildAttLog() : "";
-  }).catch(function(e){ console.log("sessionLogs load err:", e); });
+    if (log) log.innerHTML = buildAttLog();
+  }).catch(function(e){ console.log("sessionLogs load:", e); });
+
+  // Also load any existing attendance collection
+  window._dbl.getDocs(window._dbl.collection(window._db, "attendance"))
+  .then(function(snap) {
+    snap.forEach(function(d) {
+      var data = d.data();
+      var exists = _sessionLogAtt.find(function(x){ return x._fid === "att_"+d.id; });
+      if (!exists) {
+        _sessionLogAtt.push({
+          _fid: "att_" + d.id,
+          name: data.user || data.name || "Unknown",
+          role: data.role || "",
+          date: data.date || "",
+          dateDisplay: data.date || "",
+          punchIn: data.punchIn || data.loginTime || "",
+          punchOut: data.punchOut || data.logoutTime || "",
+          duration: data.duration || "",
+          type: "punchout",
+          source: "attendance"
+        });
+      }
+    });
+    if (_curFinTab === "fin-att") refreshFinTab();
+    var log = document.getElementById("att-log");
+    if (log) log.innerHTML = buildAttLog();
+  }).catch(function(e){ console.log("attendance load:", e); });
 }
+
 
 
 // PWA Manifest - inject dynamically so it works from file:// and https://
