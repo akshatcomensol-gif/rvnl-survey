@@ -4063,6 +4063,10 @@ function swFinTab(tabId, btn) {
   if (btn) btn.classList.add("active");
   var el = document.getElementById("fin-content");
   if (!el) return;
+  // Load attendance data fresh when switching to attendance tab
+  if (tabId === "fin-att") {
+    loadAttendanceAll();
+  }
   try { el.innerHTML = renderFinTab(tabId); }
   catch(e) { el.innerHTML = "<div class='be'>Error: " + e.message + "</div>"; console.error(e); }
 }
@@ -4467,7 +4471,7 @@ function rTA() {
 // TAB 7 — ATTENDANCE
 // ============================================================
 function rAtt() {
-  // Merge all 3 sources: in-memory + Firebase + sessionLogs
+  // Merge all sources
   var allRecs = [];
   (attendanceLog || []).forEach(function(a){ allRecs.push(a); });
   (FIN.attendance || []).forEach(function(a){
@@ -4485,41 +4489,192 @@ function rAtt() {
     records = records.filter(function(a){ return a.name === cu.name; });
   }
 
+  // Group by person+date → sum total hours per day
+  var byPersonDate = {};
+  records.forEach(function(a) {
+    var nm = a.name || "?";
+    var dt = a.date || a.dateDisplay || "-";
+    var key = nm + "|" + dt;
+    if (!byPersonDate[key]) {
+      byPersonDate[key] = {
+        name: nm, role: a.role||"", date: dt,
+        dateDisplay: a.dateDisplay || dt,
+        punchIns: [], punchOuts: [],
+        totalMinutes: 0
+      };
+    }
+    var entry = byPersonDate[key];
+    if (a.punchIn) entry.punchIns.push(a.punchIn);
+    if (a.punchOut && a.punchOut !== "null" && a.punchOut !== "-") entry.punchOuts.push(a.punchOut);
+
+    // Calculate duration for this record
+    var dur = a.duration || a.durationStr || "";
+    if (dur) {
+      // Parse "Xh Ym" or "Xm" or "Xh Ym Zs"
+      var hm = dur.match(/(\d+)h/);
+      var mm = dur.match(/(\d+)\s*m/);
+      var hrs = hm ? parseInt(hm[1]) : 0;
+      var mins = mm ? parseInt(mm[1]) : 0;
+      entry.totalMinutes += hrs * 60 + mins;
+    } else if (a.punchIn && a.punchOut && a.punchOut !== "null" && a.punchOut !== "-") {
+      // Try to calculate from times
+      try {
+        var inT = new Date("2000/01/01 " + a.punchIn);
+        var outT = new Date("2000/01/01 " + a.punchOut);
+        if (!isNaN(inT) && !isNaN(outT) && outT > inT) {
+          entry.totalMinutes += Math.round((outT - inT) / 60000);
+        }
+      } catch(e) {}
+    }
+  });
+
+  // Collapse to person summary
+  var byPerson = {};
+  Object.values(byPersonDate).forEach(function(entry) {
+    var nm = entry.name;
+    if (!byPerson[nm]) byPerson[nm] = {
+      name: nm, role: entry.role,
+      days: 0, totalMinutes: 0,
+      dailyRate: parseFloat((FIN.dailyRates && FIN.dailyRates[nm]) || 0),
+      entries: []
+    };
+    byPerson[nm].days += 1;
+    byPerson[nm].totalMinutes += entry.totalMinutes;
+    byPerson[nm].entries.push(entry);
+  });
+
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Attendance & Salary</div>";
-  h += "<div style='display:flex;gap:8px'><button class='btn btn-blue' data-action='refresh-att'>&#8635; Refresh</button>";
-  h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button></div></div>";
-  h += "<div class='bi'>Punch In/Out se attendance track hoti hai.</div>";
+  h += "<div style='display:flex;gap:8px'>";
+  h += "<button class='btn btn-blue' onclick='loadAttendanceAll()'>&#8635; Refresh</button>";
+  h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button>";
+  h += "<button class='btn btn-ghost' onclick='exportAttExcel()'>&#128229; Excel</button>";
+  h += "</div></div>";
   h += "<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>Debug: live=" + (attendanceLog||[]).length + " firebase=" + (FIN.attendance||[]).length + " sessions=" + (_sessionLogAtt||[]).length + " total=" + records.length + "</div>";
 
-  if (!records.length) {
+  // Summary table
+  var people = Object.values(byPerson);
+  if (!people.length) {
     h += "<div class='bw'>Koi attendance record nahi. Team members Attendance tab pe Punch In karein.</div>";
   } else {
-    var byPerson = {};
-    records.forEach(function(a){
-      var nm = a.name||"?";
-      if (!byPerson[nm]) byPerson[nm] = {name:nm, role:a.role||"", days:0, dailyRate:parseFloat(a.dailyRate||0)};
-      if (a.duration||a.durationStr||a.punchOut) byPerson[nm].days++;
-    });
-    h += "<div style='overflow-x:auto;margin-bottom:14px'><table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days</th><th>Rate</th><th>Salary</th></tr></thead><tbody>";
-    Object.values(byPerson).forEach(function(p){
-      h += "<tr><td><b>" + p.name + "</b></td><td>" + (p.role||"-") + "</td><td>" + p.days + "</td><td>&#8377;" + (p.dailyRate||0) + "</td><td><b>&#8377;" + (p.days*(p.dailyRate||0)) + "</b></td></tr>";
+    h += "<div style='overflow-x:auto;margin-bottom:16px'><table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days Present</th><th>Total Hours</th><th>Daily Rate</th><th>Salary Due</th></tr></thead><tbody>";
+    people.forEach(function(p) {
+      var hrs = Math.floor(p.totalMinutes / 60);
+      var mins = p.totalMinutes % 60;
+      var durStr = p.totalMinutes > 0 ? hrs + "h " + mins + "m" : "-";
+      var sal = p.days * p.dailyRate;
+      h += "<tr><td><strong>" + p.name + "</strong></td>";
+      h += "<td style='font-size:11px'>" + (p.role||"-") + "</td>";
+      h += "<td style='font-weight:700'>" + p.days + " day" + (p.days!==1?"s":"") + "</td>";
+      h += "<td>" + durStr + "</td>";
+      h += "<td>&#8377;" + (p.dailyRate||0) + "/day</td>";
+      h += "<td style='font-weight:700;color:var(--gold)'>&#8377;" + sal.toFixed(0) + "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
 
-  h += "<div class='ct' style='font-size:13px;margin-bottom:8px'>Attendance Log</div>";
-  h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Date</th><th>Punch In</th><th>Punch Out</th><th>Duration</th></tr></thead><tbody>";
-  if (!records.length) {
-    h += "<tr><td colspan='5' style='text-align:center;color:var(--muted)'>No records</td></tr>";
+  // Detailed log — one row per person-day
+  h += "<div class='ct' style='font-size:13px;margin-bottom:8px'>Daily Attendance Log</div>";
+  h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Date</th><th>First In</th><th>Last Out</th><th>Total Hours</th><th>Status</th></tr></thead><tbody>";
+  var allEntries = [];
+  Object.values(byPersonDate).forEach(function(e){ allEntries.push(e); });
+  if (!allEntries.length) {
+    h += "<tr><td colspan='6' style='text-align:center;color:var(--muted)'>No records</td></tr>";
   } else {
-    records.slice().reverse().slice(0,50).forEach(function(a){
-      h += "<tr><td>" + (a.name||"-") + "</td><td style='font-size:11px'>" + (a.dateDisplay||a.date||"-") + "</td><td>" + (a.punchIn||"-") + "</td><td>" + (a.punchOut||"-") + "</td><td>" + (a.duration||a.durationStr||"-") + "</td></tr>";
+    allEntries.sort(function(a,b){ return (b.date||"").localeCompare(a.date||""); }).forEach(function(e) {
+      var firstIn = e.punchIns.length ? e.punchIns[0] : "-";
+      var lastOut = e.punchOuts.length ? e.punchOuts[e.punchOuts.length-1] : "<span class='tag tg'>Active</span>";
+      var hrs = Math.floor(e.totalMinutes / 60);
+      var mins = e.totalMinutes % 60;
+      var durStr = e.totalMinutes > 0 ? hrs + "h " + mins + "m" : "-";
+      // Status: red if < 8 hours (480 min), green if >= 8 hours
+      var statusTag;
+      if (e.totalMinutes === 0) {
+        statusTag = "<span class='tag ty'>In Progress</span>";
+      } else if (e.totalMinutes < 480) {
+        statusTag = "<span class='tag to' title='8 hours se kam'>&#9888; " + durStr + "</span>";
+      } else {
+        statusTag = "<span class='tag tg'>&#10003; Full Day</span>";
+      }
+      h += "<tr><td><strong>" + e.name + "</strong></td>";
+      h += "<td style='font-size:11px'>" + (e.dateDisplay||e.date||"-") + "</td>";
+      h += "<td>" + firstIn + "</td>";
+      h += "<td>" + lastOut + "</td>";
+      h += "<td style='font-weight:700'>" + durStr + "</td>";
+      h += "<td>" + statusTag + "</td></tr>";
     });
   }
   h += "</tbody></table></div></div>";
   return h;
+}
+
+// Export attendance to Excel
+function exportAttExcel() {
+  if (typeof XLSX === "undefined") { showToast("Excel library not loaded"); return; }
+  var allRecs = [];
+  (attendanceLog || []).forEach(function(a){ allRecs.push(a); });
+  (FIN.attendance || []).forEach(function(a){
+    if (a.deleted) return;
+    var dup = allRecs.find(function(r){ return r.name===a.name && r.punchIn===a.punchIn; });
+    if (!dup) allRecs.push(a);
+  });
+  (_sessionLogAtt || []).forEach(function(a){
+    var dup = allRecs.find(function(r){ return r.name===a.name && (r.punchIn===a.punchIn || r._fid===a._fid); });
+    if (!dup) allRecs.push(a);
+  });
+
+  // Group by person+date
+  var byPersonDate = {};
+  allRecs.forEach(function(a) {
+    var nm = a.name||"?"; var dt = a.date||a.dateDisplay||"-";
+    var key = nm+"|"+dt;
+    if (!byPersonDate[key]) byPersonDate[key] = {name:nm, role:a.role||"", date:dt, dateDisplay:a.dateDisplay||dt, punchIns:[], punchOuts:[], totalMinutes:0};
+    var entry = byPersonDate[key];
+    if (a.punchIn) entry.punchIns.push(a.punchIn);
+    if (a.punchOut && a.punchOut!=="null" && a.punchOut!=="-") entry.punchOuts.push(a.punchOut);
+    var dur = a.duration||a.durationStr||"";
+    if (dur) {
+      var hm=dur.match(/(\d+)h/); var mm=dur.match(/(\d+)\s*m/);
+      entry.totalMinutes += (hm?parseInt(hm[1]):0)*60 + (mm?parseInt(mm[1]):0);
+    } else if (a.punchIn && a.punchOut && a.punchOut!=="null") {
+      try {
+        var inT=new Date("2000/01/01 "+a.punchIn); var outT=new Date("2000/01/01 "+a.punchOut);
+        if (!isNaN(inT)&&!isNaN(outT)&&outT>inT) entry.totalMinutes+=Math.round((outT-inT)/60000);
+      } catch(e){}
+    }
+  });
+
+  // Daily rates
+  var rates = FIN.dailyRates || {};
+
+  var rows = [["Name","Role","Date","First Punch In","Last Punch Out","Total Hours","Total Minutes","Daily Rate","Salary","Status"]];
+  Object.values(byPersonDate).sort(function(a,b){ return a.name.localeCompare(b.name)||b.date.localeCompare(a.date); }).forEach(function(e) {
+    var hrs = Math.floor(e.totalMinutes/60); var mins = e.totalMinutes%60;
+    var durStr = e.totalMinutes>0 ? hrs+"h "+mins+"m" : "-";
+    var rate = parseFloat(rates[e.name]||0);
+    var status = e.totalMinutes===0?"In Progress":e.totalMinutes<480?"Short Day (<8h)":"Full Day";
+    rows.push([e.name, e.role, e.dateDisplay||e.date, e.punchIns[0]||"-", e.punchOuts[e.punchOuts.length-1]||"-", durStr, e.totalMinutes, rate, rate, status]);
+  });
+
+  // Summary sheet
+  var byPerson = {};
+  Object.values(byPersonDate).forEach(function(e){
+    if (!byPerson[e.name]) byPerson[e.name]={name:e.name,role:e.role,days:0,totalMins:0,rate:parseFloat((FIN.dailyRates||{})[e.name]||0)};
+    byPerson[e.name].days++; byPerson[e.name].totalMins+=e.totalMinutes;
+  });
+  var sumRows = [["Name","Role","Days Present","Total Hours","Daily Rate","Total Salary"]];
+  Object.values(byPerson).forEach(function(p){
+    var hrs=Math.floor(p.totalMins/60); var mins=p.totalMins%60;
+    sumRows.push([p.name,p.role,p.days,hrs+"h "+mins+"m",p.rate,p.days*p.rate]);
+  });
+
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Daily Attendance");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), "Salary Summary");
+  var dt = new Date().toLocaleDateString("en-IN").replace(/\//g,"-");
+  XLSX.writeFile(wb, "Comensol_Attendance_" + dt + ".xlsx");
+  showToast("Attendance Excel downloaded!");
 }
 
 
@@ -5810,6 +5965,29 @@ async function saveChangePwd() {
 
 // Load old attendance from sessionLogs collection
 var _sessionLogAtt = [];
+function loadAttendanceAll() {
+  showToast("Loading attendance...");
+  loadSessionLogs();
+  // Also reload fin_attendance via finLoad
+  if (FB_ENABLED && window._db) {
+    window._dbl.getDocs(window._dbl.collection(window._db, "fin_attendance"))
+    .then(function(snap) {
+      FIN.attendance = FIN.attendance || [];
+      snap.forEach(function(d) {
+        var data = d.data();
+        var exists = FIN.attendance.find(function(x){ return x._fid === d.id; });
+        if (!exists) FIN.attendance.push(Object.assign({_fid: d.id}, data));
+      });
+      setTimeout(function() {
+        if (_curFinTab === "fin-att") refreshFinTab();
+      }, 500);
+    }).catch(function(e){ console.log("fin_att load:", e); });
+  }
+  setTimeout(function() {
+    if (_curFinTab === "fin-att") refreshFinTab();
+  }, 2000);
+}
+
 function loadSessionLogs() {
   if (!FB_ENABLED || !window._db) return;
   // Load from sessionLogs (old punch data)
