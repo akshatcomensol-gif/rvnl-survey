@@ -404,6 +404,11 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
         <option value="dtp">DTP &amp; Shape File</option>
         <option value="head">Project Head</option>
         <option value="rvnl">RVNL / IE Viewer</option>
+              <option value="gis">GIS &amp; DTP</option>
+        <option value="manager">Field Manager</option>
+        <option value="finance">Finance / Accounts</option>
+        <option value="supervisor">Site Supervisor</option>
+        <option value="ie">IE Inspector</option>
       </select>
     </div>
     <div class="fg"><label>Full Name *</label><input class="finp" id="au-name" placeholder="Full name"></div>
@@ -4462,63 +4467,61 @@ function rTA() {
 // TAB 7 — ATTENDANCE
 // ============================================================
 function rAtt() {
-  // Merge fin_attendance (new) + sessionLogs (old) data
-  var records = (FIN.attendance || []).concat(_sessionLogAtt || []);
-  records = records.filter(function(a){ return !a.deleted; });
-  // Head/manager sees everyone, others see only self
+  // Merge all 3 sources: in-memory + Firebase + sessionLogs
+  var allRecs = [];
+  (attendanceLog || []).forEach(function(a){ allRecs.push(a); });
+  (FIN.attendance || []).forEach(function(a){
+    if (a.deleted) return;
+    var dup = allRecs.find(function(r){ return r.name===a.name && r.punchIn===a.punchIn; });
+    if (!dup) allRecs.push(a);
+  });
+  (_sessionLogAtt || []).forEach(function(a){
+    var dup = allRecs.find(function(r){ return r.name===a.name && (r.punchIn===a.punchIn || r._fid===a._fid); });
+    if (!dup) allRecs.push(a);
+  });
+
+  var records = allRecs;
   if (cu.role !== "head" && cu.role !== "manager") {
     records = records.filter(function(a){ return a.name === cu.name; });
   }
 
-  // Group by person-date
-  var byPerson = {};
-  records.forEach(function(a) {
-    var key = a.name;
-    if (!byPerson[key]) byPerson[key] = {name:a.name, role:a.role, days:0, salary:parseFloat(a.dailyRate||0)*0, dailyRate:parseFloat(a.dailyRate||0)};
-    if (a.type==="punchout" && a.duration) byPerson[key].days += 1;
-  });
-
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Attendance & Salary</div>";
-  h += "<div style='display:flex;gap:8px'>";
-  h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button>";
-  h += "</div></div>";
-  h += "<div class='bi' style='font-size:11px'>Punch In/Out se attendance track hoti hai. Daily rate × days present = salary due.</div>";
+  h += "<div style='display:flex;gap:8px'><button class='btn btn-blue' data-action='refresh-att'>&#8635; Refresh</button>";
+  h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button></div></div>";
+  h += "<div class='bi'>Punch In/Out se attendance track hoti hai.</div>";
+  h += "<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>Debug: live=" + (attendanceLog||[]).length + " firebase=" + (FIN.attendance||[]).length + " sessions=" + (_sessionLogAtt||[]).length + " total=" + records.length + "</div>";
 
-  // Summary table
-  var people = Object.values(byPerson);
-  if (!people.length) {
-    h += "<div class='bw'>Koi attendance record nahi. Team members punch in karein.</div>";
+  if (!records.length) {
+    h += "<div class='bw'>Koi attendance record nahi. Team members Attendance tab pe Punch In karein.</div>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days Present</th><th>Daily Rate</th><th>Salary Due</th></tr></thead><tbody>";
-    people.forEach(function(p) {
-      var salaryDue = p.days * p.dailyRate;
-      h += "<tr><td><strong>" + p.name + "</strong></td>";
-      h += "<td style='font-size:11px'>" + (p.role||"-") + "</td>";
-      h += "<td style='font-weight:700'>" + p.days + " days</td>";
-      h += "<td>₹" + p.dailyRate.toFixed(0) + "/day</td>";
-      h += "<td style='font-weight:700;color:var(--gold)'>₹" + salaryDue.toFixed(0) + "</td></tr>";
+    var byPerson = {};
+    records.forEach(function(a){
+      var nm = a.name||"?";
+      if (!byPerson[nm]) byPerson[nm] = {name:nm, role:a.role||"", days:0, dailyRate:parseFloat(a.dailyRate||0)};
+      if (a.duration||a.durationStr||a.punchOut) byPerson[nm].days++;
+    });
+    h += "<div style='overflow-x:auto;margin-bottom:14px'><table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days</th><th>Rate</th><th>Salary</th></tr></thead><tbody>";
+    Object.values(byPerson).forEach(function(p){
+      h += "<tr><td><b>" + p.name + "</b></td><td>" + (p.role||"-") + "</td><td>" + p.days + "</td><td>&#8377;" + (p.dailyRate||0) + "</td><td><b>&#8377;" + (p.days*(p.dailyRate||0)) + "</b></td></tr>";
     });
     h += "</tbody></table></div>";
   }
 
-  // Recent attendance log
-  h += "<div style='margin-top:16px'><div class='ct' style='font-size:14px'>Recent Attendance Log</div>";
-  var recent = records.slice(-30).reverse();
-  if (!recent.length) {
-    h += "<div style='color:var(--muted);font-size:13px'>No records.</div>";
+  h += "<div class='ct' style='font-size:13px;margin-bottom:8px'>Attendance Log</div>";
+  h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Date</th><th>Punch In</th><th>Punch Out</th><th>Duration</th></tr></thead><tbody>";
+  if (!records.length) {
+    h += "<tr><td colspan='5' style='text-align:center;color:var(--muted)'>No records</td></tr>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Date</th><th>In</th><th>Out</th><th>Duration</th></tr></thead><tbody>";
-    recent.forEach(function(a) {
-      if (a.type !== "punchout") return;
-      h += "<tr><td>" + a.name + "</td><td>" + a.date + "</td><td>" + (a.punchIn||"-") + "</td><td>" + (a.punchOut||"-") + "</td><td>" + (a.duration||"-") + "</td></tr>";
+    records.slice().reverse().slice(0,50).forEach(function(a){
+      h += "<tr><td>" + (a.name||"-") + "</td><td style='font-size:11px'>" + (a.dateDisplay||a.date||"-") + "</td><td>" + (a.punchIn||"-") + "</td><td>" + (a.punchOut||"-") + "</td><td>" + (a.duration||a.durationStr||"-") + "</td></tr>";
     });
-    h += "</tbody></table></div>";
   }
-  h += "</div></div>";
+  h += "</tbody></table></div></div>";
   return h;
 }
+
 
 // ============================================================
 // TAB 8 — REPORTS
