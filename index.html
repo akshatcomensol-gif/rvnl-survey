@@ -295,6 +295,7 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
       <button class="navtab" id="nav-gismap" onclick="gp('gismap')">&#127758; GIS Map</button>
       <button class="navtab" onclick="gp('import')" id="nav-import">&#128229; Import</button>
       <button class="navtab" onclick="gp('reports')">&#128202; Reports</button>
+      <button class="navtab" id="nav-fieldreport" style="display:none" onclick="gp('finance');setTimeout(function(){var t=document.querySelector('[data-tab=fin-fieldreport]');if(t)t.click();},300)">&#128203; Daily Report</button>
       <button class="navtab" id="nav-finance" style="display:none" onclick="gp('finance')">&#128184; Finance</button>
       <button class="navtab" id="nav-users" style="display:none" onclick="gp('users')">&#128101; Team</button>
       <span class="nav-hint">◀ swipe ▶</span>
@@ -665,31 +666,26 @@ function uploadFileToStorage(file, path, cb, gpsCoords) {
 
 function loadFromFirebase() {
   if (!FB_ENABLED || !window._db) return;
-  // Load submissions
+  // Real-time listener for submissions
   var q = window._dbl.query(window._dbl.collection(window._db, "submissions"), window._dbl.orderBy("savedAt","desc"));
-  window._dbl.getDocs(q).then(function(snap) {
+  window._dbl.onSnapshot(q, function(snap) {
     var loaded = [];
-    snap.forEach(function(d) {
-      var docData = Object.assign({id:d.id}, d.data());
-      (docData.ofc||[]).forEach(function(r){ if(r.evidence){ r.evidence.photoUrls=r.evidence.photoUrls||[]; r.evidence.videoUrls=r.evidence.videoUrls||[]; r.evidence.sorUrls=r.evidence.sorUrls||[]; }});
-      (docData.gpon||[]).forEach(function(r){ if(r.evidence){ r.evidence.photoUrls=r.evidence.photoUrls||[]; r.evidence.videoUrls=r.evidence.videoUrls||[]; }});
-      (docData.jc||[]).forEach(function(r){ if(r.evidence){ r.evidence.photoUrls=r.evidence.photoUrls||[]; r.evidence.videoUrls=r.evidence.videoUrls||[]; }});
-      docData._firestoreId = d.id; // Store Firestore doc ID for future updates
-      loaded.push(docData);
-    });
-    submissions = loaded; // Always replace (even if empty)
+    snap.forEach(function(d){ loaded.push(Object.assign({_fid:d.id}, d.data())); });
+    allSubs = loaded;
     updBadge();
-    if (!window._fbFirstLoad) { window._fbFirstLoad = true; gp("dashboard"); }
-    if (loaded.length > 0) showToast(loaded.length + " submissions loaded from cloud!");
-    else showToast("Cloud connected. No submissions yet.");
-  }).catch(function(e) {
-    console.error("FB load error:", e);
-    showToast("Cloud load failed - local mode");
-    gp("dashboard");
-  });
-  // Load Excel block imports separately
-  loadImportsFromFirebase();
+    // Auto-refresh current view if on dashboard or review
+    var curPage = document.querySelector(".navtab.active");
+    if (curPage) {
+      var oc = curPage.getAttribute("onclick") || "";
+      if (oc.includes("dashboard") || oc.includes("review")) {
+        var el = document.getElementById("page");
+        if (el && oc.includes("dashboard")) el.innerHTML = renderDash();
+        if (el && oc.includes("review")) el.innerHTML = renderReview();
+      }
+    }
+  }, function(e){ console.log("snapshot err:", e); });
 }
+
 
 // ====================================================
 // AUTH
@@ -753,7 +749,7 @@ function togglePwd() {
   else { inp.type = "password"; btn.innerHTML = "&#128065;"; }
 }
 
-function doLogin() {
+async function doLogin() {
   var r = document.getElementById("lr").value;
   var n = document.getElementById("ln").value.trim();
   var p = document.getElementById("lp").value;
@@ -778,6 +774,12 @@ function doLogin() {
   if (impTab) impTab.style.display = ["head","gis","manager"].includes(cu.role) ? "block" : "none";
   var finTab = document.getElementById("nav-finance");
   if (finTab) finTab.style.display = ["head","finance","manager","supervisor"].includes(cu.role) ? "block" : "none";
+  var frBtn = document.getElementById("nav-fieldreport");
+  if (frBtn) frBtn.style.display = ["field","review"].includes(cu.role) ? "block" : "none";
+  var finTab = document.getElementById("nav-finance");
+  if (finTab) finTab.style.display = ["head","finance","manager","supervisor"].includes(cu.role) ? "block" : "none";
+  var frBtn = document.getElementById("nav-fieldreport");
+  if (frBtn) frBtn.style.display = ["field","review"].includes(cu.role) ? "block" : "none";
   initFirebase();
   updBadge();
   cu.loginTime = Date.now();
@@ -3442,6 +3444,7 @@ function renderGISMap() {
   var canUploadShp = ["gis","head"].includes(cu.role);
   var h = '<div class="card"><div class="ct">&#127758; GIS Survey Map</div>';
   h += '<div class="bi">Block ki OFC route, damage sections, GP aur JC locations map pe dekhein. GIS shapefile upload karo aur survey data overlay karo.</div>';
+  h += '<div style="margin-bottom:10px"><button class="btn btn-blue" onclick="refreshGISOverlay()">&#8635; Refresh Survey Overlay</button></div>';
 
   // Block selector
   h += '<div class="frow"><div class="fgrp"><label class="flbl">Block Select (Survey Data)</label><select class="fsel" id="gmap-block" onchange="gisRefreshMap()">';
@@ -3726,348 +3729,331 @@ function exportGeoJSON() {
 
 
 
-
 // ====================================================
-// FINANCE ERP MODULE v2 — RVNL PROJECT
-// Complete rebuild — clean, no quote conflicts
+// COMENSOL ERP — FINANCE MODULE v2 (CLEAN BUILD)
 // ====================================================
 
-var BLOCK_GIS_DATA = {
-  "FAT_AMAULI": {district:"Fatehpur",block:"AMAULI",gps:66,greenKm:243,brownKm:0},
-  "FAT_AIRAYAN": {district:"Fatehpur",block:"AIRAYAN",gps:50,greenKm:198,brownKm:0},
-  "FAT_KHAJUHA": {district:"Fatehpur",block:"KHAJUHA",gps:74,greenKm:245,brownKm:0},
-  "FAT_MALWAN": {district:"Fatehpur",block:"MALWAN",gps:72,greenKm:242.7,brownKm:0},
-  "FAT_DEVAI": {district:"Fatehpur",block:"DEVAI MAI",gps:60,greenKm:181.5,brownKm:0},
-  "GON_MUJEHANA": {district:"Gonda",block:"MUJEHANA",gps:58,greenKm:199,brownKm:0},
-  "GON_COLONELGANJ": {district:"Gonda",block:"COLONELGANJ",gps:71,greenKm:235,brownKm:0},
-  "GON_BELSAR": {district:"Gonda",block:"BELSAR",gps:48,greenKm:155.6,brownKm:0},
-  "GON_ITIATHOK": {district:"Gonda",block:"ITIATHOK",gps:85,greenKm:246,brownKm:0},
-  "GON_CHHAPIA": {district:"Gonda",block:"CHHAPIA",gps:87,greenKm:235,brownKm:0},
-  "GON_KATRA": {district:"Gonda",block:"KATRA BAZAR",gps:74,greenKm:264,brownKm:0},
-  "GON_PARASPUR": {district:"Gonda",block:"PARASPUR",gps:75,greenKm:259.5,brownKm:0},
-  "GON_PANDRI": {district:"Gonda",block:"PANDRI KRIPAL",gps:57,greenKm:159,brownKm:0},
-  "HAR_AHIRORI": {district:"Hardoi",block:"AHIRORI",gps:78,greenKm:135.257,brownKm:203.43},
-  "HAR_BAWAN": {district:"Hardoi",block:"BAWAN",gps:74,greenKm:137.532,brownKm:195.26},
-  "HAR_BEHENDAR": {district:"Hardoi",block:"BEHENDAR",gps:68,greenKm:78.855,brownKm:183.82},
-  "HAR_BHARKHANI": {district:"Hardoi",block:"BHARKHANI",gps:89,greenKm:194.913,brownKm:263.05},
-  "HAR_BILGRAM": {district:"Hardoi",block:"BILGRAM",gps:79,greenKm:154.532,brownKm:190.32},
-  "HAR_HARPALPUR": {district:"Hardoi",block:"HARPALPUR",gps:63,greenKm:147.159,brownKm:189.28},
-  "HAR_KACHAUNA": {district:"Hardoi",block:"KACHAUNA",gps:41,greenKm:112.018,brownKm:74.903},
-  "HAR_MADHOGANJ": {district:"Hardoi",block:"MADHOGANJ",gps:77,greenKm:140.4,brownKm:203},
-  "HAR_PIHANI": {district:"Hardoi",block:"PIHANI",gps:77,greenKm:177.803,brownKm:118.087},
-  "HAR_SANDI": {district:"Hardoi",block:"SANDI",gps:65,greenKm:115.764,brownKm:262.54},
-  "HAR_SHAHABAD": {district:"Hardoi",block:"SHAHABAD",gps:71,greenKm:202.3,brownKm:171.195},
-  "HAR_TANDIYAWAN": {district:"Hardoi",block:"TANDIYAWAN",gps:68,greenKm:232.494,brownKm:200.81},
-  "HAR_TODARPUR": {district:"Hardoi",block:"TODARPUR",gps:71,greenKm:258.127,brownKm:93.182},
-  "SIT_BEHTA": {district:"Sitapur",block:"BEHTA",gps:94,greenKm:172.8,brownKm:215.4},
-  "SIT_KHAIRABAD": {district:"Sitapur",block:"KHAIRABAD",gps:79,greenKm:144,brownKm:197.48},
-  "SIT_LAHARPUR": {district:"Sitapur",block:"LAHARPUR",gps:68,greenKm:87.935,brownKm:163.104},
-  "SIT_MAHMUDABAD": {district:"Sitapur",block:"MAHMUDABAD",gps:70,greenKm:249.141,brownKm:148.429},
-  "SIT_MAHOLI": {district:"Sitapur",block:"MAHOLI",gps:70,greenKm:109.829,brownKm:165.35},
-  "SIT_PAHALA": {district:"Sitapur",block:"PAHALA",gps:91,greenKm:177.065,brownKm:203.84},
-  "SIT_PARSENDI": {district:"Sitapur",block:"PARSENDI",gps:83,greenKm:122.207,brownKm:206.36},
-  "SIT_PISAWAN": {district:"Sitapur",block:"PISAWAN",gps:98,greenKm:155.672,brownKm:226.4},
-  "SIT_RAMPUR": {district:"Sitapur",block:"RAMPUR MATHURA",gps:79,greenKm:257.422,brownKm:217.481},
-  "SIT_REUSA": {district:"Sitapur",block:"REUSA",gps:98,greenKm:161.144,brownKm:245.466},
-  "SIT_SAKRAN": {district:"Sitapur",block:"SAKRAN",gps:85,greenKm:133.341,brownKm:169},
-  "UNN_ASOHA": {district:"Unnao",block:"ASOHA",gps:67,greenKm:122.4,brownKm:173.52},
-  "UNN_BANGARMAU": {district:"Unnao",block:"BANGARMAU",gps:55,greenKm:224.394,brownKm:144.94},
-  "UNN_BICHHIYA": {district:"Unnao",block:"BICHHIYA",gps:57,greenKm:102.234,brownKm:175.04},
-  "UNN_BIGHAPUR": {district:"Unnao",block:"BIGHAPUR",gps:67,greenKm:118.228,brownKm:161.32},
-  "UNN_GANJ": {district:"Unnao",block:"GANJ MORADABAD",gps:60,greenKm:108,brownKm:143.74},
-  "UNN_HILAULI": {district:"Unnao",block:"HILAULI",gps:50,greenKm:122.557,brownKm:78.608},
-  "UNN_PURWA": {district:"Unnao",block:"PURWA",gps:56,greenKm:104.4,brownKm:141.29},
-  "UNN_SIKANDARPUR": {district:"Unnao",block:"SIKANDARPUR SARAUSI",gps:55,greenKm:111.971,brownKm:90.066},
-  "UNN_SUMERPUR": {district:"Unnao",block:"SUMERPUR",gps:73,greenKm:127.062,brownKm:180.13}
+var BLOCK_GIS = {
+  "FAT-01":{gp:66,greenKm:243.0,brownKm:0},
+  "GON-01":{gp:58,greenKm:199.0,brownKm:0},
+  "GON-02":{gp:71,greenKm:235.0,brownKm:0},
+  "FAT-02":{gp:50,greenKm:198.0,brownKm:0},
+  "GON-03":{gp:48,greenKm:155.6,brownKm:0},
+  "GON-04":{gp:85,greenKm:246.0,brownKm:0},
+  "GON-05":{gp:87,greenKm:235.0,brownKm:0},
+  "FAT-03":{gp:74,greenKm:245.0,brownKm:0},
+  "FAT-04":{gp:72,greenKm:242.7,brownKm:0},
+  "GON-06":{gp:74,greenKm:264.0,brownKm:0},
+  "GON-07":{gp:75,greenKm:259.5,brownKm:0},
+  "GON-08":{gp:57,greenKm:159.0,brownKm:0},
+  "FAT-05":{gp:60,greenKm:181.5,brownKm:0},
+  "HAR-01":{gp:78,greenKm:135.257,brownKm:203.43},
+  "HAR-02":{gp:74,greenKm:137.532,brownKm:195.26},
+  "HAR-03":{gp:68,greenKm:78.855,brownKm:183.82},
+  "HAR-04":{gp:89,greenKm:194.913,brownKm:263.05},
+  "HAR-05":{gp:79,greenKm:154.532,brownKm:190.32},
+  "HAR-06":{gp:63,greenKm:147.159,brownKm:189.28},
+  "HAR-07":{gp:41,greenKm:112.018,brownKm:74.903},
+  "HAR-08":{gp:77,greenKm:140.4,brownKm:203.0},
+  "HAR-09":{gp:77,greenKm:177.803,brownKm:118.087},
+  "HAR-10":{gp:65,greenKm:115.764,brownKm:262.54},
+  "HAR-11":{gp:71,greenKm:202.3,brownKm:171.195},
+  "HAR-12":{gp:68,greenKm:232.494,brownKm:200.81},
+  "HAR-13":{gp:71,greenKm:258.127,brownKm:93.182},
+  "SIT-01":{gp:94,greenKm:172.8,brownKm:215.4},
+  "SIT-02":{gp:79,greenKm:144.0,brownKm:197.48},
+  "SIT-03":{gp:68,greenKm:87.935,brownKm:163.104},
+  "SIT-04":{gp:70,greenKm:249.141,brownKm:148.429},
+  "SIT-05":{gp:70,greenKm:109.829,brownKm:165.35},
+  "SIT-06":{gp:91,greenKm:177.065,brownKm:203.84},
+  "SIT-07":{gp:83,greenKm:122.207,brownKm:206.36},
+  "SIT-08":{gp:98,greenKm:155.672,brownKm:226.4},
+  "SIT-09":{gp:79,greenKm:257.422,brownKm:217.481},
+  "SIT-10":{gp:98,greenKm:161.144,brownKm:245.466},
+  "SIT-11":{gp:85,greenKm:133.341,brownKm:169.0},
+  "UNN-01":{gp:67,greenKm:122.4,brownKm:173.52},
+  "UNN-02":{gp:55,greenKm:224.394,brownKm:144.94},
+  "UNN-03":{gp:57,greenKm:102.234,brownKm:175.04},
+  "UNN-04":{gp:67,greenKm:118.228,brownKm:161.32},
+  "UNN-05":{gp:60,greenKm:108.0,brownKm:143.74},
+  "UNN-06":{gp:50,greenKm:122.557,brownKm:78.608},
+  "UNN-07":{gp:56,greenKm:104.4,brownKm:141.29},
+  "UNN-08":{gp:55,greenKm:111.971,brownKm:90.066},
+  "UNN-09":{gp:73,greenKm:127.062,brownKm:180.13}
 };
 
-function getGISByBlock(blockId) {
-  // Match by BLOCKS array id to GIS data
-  var bl = BLOCKS.find(function(b) { return b.id === blockId; });
-  if (!bl) return null;
-  var bn = bl.name.toUpperCase();
-  for (var k in BLOCK_GIS_DATA) {
-    if (BLOCK_GIS_DATA[k].block.toUpperCase() === bn) return BLOCK_GIS_DATA[k];
-  }
-  return null;
-}
-
-// ── FINANCE DATA STORE ──
+// Finance data store
 var FIN = {
-  funds: [],
-  vendors: [],
-  workProgress: [],
-  payments: [],
-  expenses: [],
-  taEntries: [],
-  attendance: []
+  funds:[],
+  vendors:[],
+  workLog:[],
+  payments:[],
+  expenses:[],
+  taLog:[],
+  attendance:[]
 };
 
-var FIN_LOADED = false;
+// ── Firebase helpers ──
+function finSave(col, obj) {
+  if (!FB_ENABLED || !window._db) return;
+  obj.savedAt = new Date().toISOString();
+  if (obj._fid) {
+    window._dbl.setDoc(window._dbl.doc(window._db, "fin_"+col, obj._fid), obj)
+      .catch(function(e){ console.error("finSave err:", e); });
+  } else {
+    window._dbl.addDoc(window._dbl.collection(window._db, "fin_"+col), obj)
+      .then(function(r){ obj._fid = r.id; })
+      .catch(function(e){ console.error("finAdd err:", e); });
+  }
+}
 
 function finLoad() {
   if (!FB_ENABLED || !window._db) return;
-  var cols = ["funds","vendors","workProgress","payments","expenses","taEntries","attendance"];
+  var cols = ["funds","vendors","workLog","payments","expenses","taLog","attendance"];
+  var loaded = 0;
   cols.forEach(function(col) {
-    window._dbl.getDocs(window._dbl.collection(window._db, "fin2_" + col))
-      .then(function(snap) {
-        FIN[col] = [];
-        snap.forEach(function(d) {
-          var obj = d.data();
-          if (!obj.deleted) FIN[col].push(Object.assign({_fid: d.id}, obj));
-        });
-        if (col === "funds") FIN_LOADED = true;
-      }).catch(function(e) { console.log("FIN load err " + col, e); });
+    // Use onSnapshot for real-time updates
+    try {
+      window._dbl.onSnapshot(
+        window._dbl.collection(window._db, "fin_"+col),
+        function(snap) {
+          FIN[col] = [];
+          snap.forEach(function(d){
+            var data = d.data();
+            if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
+          });
+          loaded++;
+          // Refresh current finance tab automatically
+          if (document.getElementById("fin-content")) {
+            refreshFinTab();
+          }
+          // Also refresh attendance badge for head
+          if (col === "attendance") updAttBadge();
+        },
+        function(e){ console.log("finSnapshot err "+col, e); }
+      );
+    } catch(ex) {
+      // Fallback to getDocs if onSnapshot not available
+      window._dbl.getDocs(window._dbl.collection(window._db, "fin_"+col))
+        .then(function(snap) {
+          FIN[col] = [];
+          snap.forEach(function(d){
+            var data = d.data();
+            if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
+          });
+        }).catch(function(e){ console.log("finLoad err "+col, e); });
+    }
   });
 }
 
-function finSave(col, obj) {
-  if (!obj._tempId) obj._tempId = Date.now().toString();
-  obj.updatedAt = new Date().toISOString();
-  if (!FB_ENABLED || !window._db) return;
-  if (obj._fid) {
-    window._dbl.setDoc(window._dbl.doc(window._db, "fin2_" + col, obj._fid), obj)
-      .catch(function(e) { console.log("finSave err", e); });
-  } else {
-    window._dbl.addDoc(window._dbl.collection(window._db, "fin2_" + col), obj)
-      .then(function(r) { obj._fid = r.id; })
-      .catch(function(e) { console.log("finAdd err", e); });
-  }
+function updAttBadge() {
+  // Could add attendance count badge here if needed
 }
 
-function finDelete(col, fid) {
-  FIN[col] = FIN[col].filter(function(x) { return x._fid !== fid; });
-  if (!FB_ENABLED || !window._db) return;
-  window._dbl.setDoc(
-    window._dbl.doc(window._db, "fin2_" + col, fid),
-    {deleted: true, deletedAt: new Date().toISOString()}
-  ).catch(function(e) { console.log("finDelete err", e); });
-}
+var _origFbReady = window._fbReady;
+window._fbReady = function() {
+  if (_origFbReady) _origFbReady();
+  setTimeout(finLoad, 1500);
+  setTimeout(loadDocs, 2000);
+  setTimeout(loadFieldReports, 2500);
+  setTimeout(loadAlerts, 3000);
+  setTimeout(loadInvoices, 3500);
+};
 
-// ── HELPERS ──
-function fmtN(n) {
+// ── Helpers ──
+function fmtR(n) {
   n = parseFloat(n) || 0;
-  if (n >= 10000000) return (n/10000000).toFixed(2) + " Cr";
-  if (n >= 100000) return (n/100000).toFixed(2) + " L";
-  if (n >= 1000) return (n/1000).toFixed(1) + "K";
-  return n.toFixed(0);
+  if (n >= 10000000) return "₹" + (n/10000000).toFixed(2) + "Cr";
+  if (n >= 100000) return "₹" + (n/100000).toFixed(2) + "L";
+  if (n >= 1000) return "₹" + (n/1000).toFixed(1) + "K";
+  return "₹" + n.toFixed(0);
 }
+function fmtN(n) { return (parseFloat(n)||0).toFixed(2); }
+function today() { return new Date().toISOString().split("T")[0]; }
+function getV(id) { var e=document.getElementById(id); return e ? e.value : ""; }
+function setV(id, v) { var e=document.getElementById(id); if(e) e.value=v; }
+function show(id, v) { var e=document.getElementById(id); if(e) e.style.display=v?"block":"none"; }
+function getGIS(bid) { return BLOCK_GIS[bid] || {gp:0,greenKm:0,brownKm:0}; }
 
-function fmtRs(n) { return "\u20b9" + fmtN(n); }
-
-function todayStr() { return new Date().toISOString().split("T")[0]; }
-
-function blockSelect(includeAll) {
-  var h = includeAll ? "<option value=''>All Blocks</option>" : "<option value=''>-- Select Block --</option>";
+function blockSelect(includeAll, filterBilled) {
+  var h = includeAll ? "<option value=''>All Blocks</option>" : "<option value=''>-- Block select karo --</option>";
   BLOCKS.forEach(function(b) {
-    var g = getGISByBlock(b.id);
-    var suffix = g ? " (" + b.district + ")" : " (" + b.district + ")";
-    h += "<option value='" + b.id + "'>" + b.name + suffix + "</option>";
+    if (filterBilled && b.status === "billed") return;
+    var g = getGIS(b.id);
+    h += "<option value='" + b.id + "'>" + b.district + " - " + b.name;
+    if (g.gp) h += " (" + g.gp + " GPs)";
+    h += "</option>";
   });
   return h;
 }
 
-function vendorsByBlock(blockId, type) {
-  return FIN.vendors.filter(function(v) {
-    return v.blockId === blockId && v.surveyType === type;
+function getVendorForBlock(bid, type) {
+  return FIN.vendors.find(function(v){
+    return v.blockId===bid && v.surveyType===type && v.active && !v.deleted;
   });
 }
 
-function statusBadge(s) {
-  var colors = {pending:"var(--gold)", approved:"var(--ok)", rejected:"var(--red)", paid:"var(--blue)", checked:"var(--blue)"};
-  return "<span style='color:" + (colors[s] || "var(--muted)") + ";font-weight:700;font-size:11px;text-transform:uppercase'>" + s + "</span>";
+// ── Event Delegation ──
+document.addEventListener("click", function(e) {
+  var t = e.target;
+
+  // Finance sub-tabs
+  var tabBtn = t.closest("[data-tab]");
+  if (tabBtn && tabBtn.closest("#fin-tabs")) {
+    e.preventDefault();
+    swFinTab(tabBtn.getAttribute("data-tab"), tabBtn);
+    return;
+  }
+
+  // Modal open
+  var modalBtn = t.closest("[data-modal]");
+  if (modalBtn) {
+    openFinModal(modalBtn.getAttribute("data-modal"), modalBtn.dataset);
+    return;
+  }
+
+  // Action buttons
+  var actionBtn = t.closest("[data-action]");
+  if (actionBtn) {
+    var action = actionBtn.getAttribute("data-action");
+    var fid = actionBtn.getAttribute("data-fid");
+    var col = actionBtn.getAttribute("data-col");
+    handleFinAction(action, fid, col, actionBtn);
+    return;
+  }
+});
+
+function handleFinAction(action, fid, col, btn) {
+  if (action === "del") {
+    if (!confirm("Delete this entry?")) return;
+    var arr = FIN[col];
+    var obj = arr && arr.find(function(x){return x._fid===fid;});
+    if (obj) { obj.deleted = true; finSave(col, obj); showToast("Deleted!"); refreshFinTab(); }
+  } else if (action === "approve-vendor") {
+    var v = FIN.vendors.find(function(x){return x._fid===fid;});
+    if (v) { v.active=true; v.approvedBy=cu.name; v.approvedAt=today(); finSave("vendors",v); showToast("Vendor approved!"); refreshFinTab(); }
+  } else if (action === "approve-payment") {
+    var p = FIN.payments.find(function(x){return x._fid===fid;});
+    if (p) { p.status="approved"; p.approvedBy=cu.name; p.approvedAt=today(); finSave("payments",p); showToast("Payment approved!"); refreshFinTab(); }
+  } else if (action === "reject-payment") {
+    var reason = prompt("Rejection reason:");
+    if (!reason) return;
+    var p2 = FIN.payments.find(function(x){return x._fid===fid;});
+    if (p2) { p2.status="rejected"; p2.rejectionReason=reason; finSave("payments",p2); showToast("Rejected!"); refreshFinTab(); }
+  } else if (action === "mark-paid") {
+    if (!confirm("Mark as PAID?")) return;
+    var p3 = FIN.payments.find(function(x){return x._fid===fid;});
+    if (p3) { p3.status="paid"; p3.paidBy=cu.name; p3.paidAt=today(); finSave("payments",p3); showToast("Marked paid!"); refreshFinTab(); }
+  } else if (action === "ta-check") {
+    var t2 = FIN.taLog.find(function(x){return x._fid===fid;});
+    if (t2) { t2.status="checked"; t2.checkedBy=cu.name; finSave("taLog",t2); showToast("TA checked!"); refreshFinTab(); }
+  } else if (action === "ta-approve") {
+    var t3 = FIN.taLog.find(function(x){return x._fid===fid;});
+    if (t3) { t3.status="approved"; t3.approvedBy=cu.name; finSave("taLog",t3); showToast("TA approved!"); refreshFinTab(); }
+  } else if (action === "ta-reject") {
+    var r = prompt("Rejection reason:");
+    if (!r) return;
+    var t4 = FIN.taLog.find(function(x){return x._fid===fid;});
+    if (t4) { t4.status="rejected"; t4.rejectionReason=r; finSave("taLog",t4); showToast("TA rejected!"); refreshFinTab(); }
+  } else if (action === "ta-amend") {
+    var km = prompt("Enter correct KM:");
+    if (!km || isNaN(km)) return;
+    var t5 = FIN.taLog.find(function(x){return x._fid===fid;});
+    if (t5) { t5.km=parseFloat(km); t5.taAmount=parseFloat(km)*2.5; t5.amendedBy=cu.name; t5.status="checked"; finSave("taLog",t5); showToast("TA amended!"); refreshFinTab(); }
+  }
 }
 
-function billLink(url) {
-  if (!url) return "<span style='color:var(--muted);font-size:11px'>—</span>";
-  return "<a href='" + url + "' target='_blank' style='color:var(--blue);font-size:11px'>&#128196; Bill</a>";
+var _curFinTab = "fin-fund";
+
+function swFinTab(tabId, btn) {
+  _curFinTab = tabId;
+  document.querySelectorAll("#fin-tabs [data-tab]").forEach(function(b){ b.classList.remove("active"); });
+  if (btn) btn.classList.add("active");
+  var el = document.getElementById("fin-content");
+  if (!el) return;
+  try { el.innerHTML = renderFinTab(tabId); }
+  catch(e) { el.innerHTML = "<div class='be'>Error: " + e.message + "</div>"; console.error(e); }
 }
 
-// ── MAIN RENDER ──
+function refreshFinTab() {
+  var el = document.getElementById("fin-content");
+  if (!el) return;
+  try { el.innerHTML = renderFinTab(_curFinTab); }
+  catch(e) { el.innerHTML = "<div class='be'>Error: " + e.message + "</div>"; }
+}
+
+// ── MAIN FINANCE PAGE ──
 function renderFinance() {
   var role = cu.role;
   var allTabs = [
-    {id:"f-funds",    label:"&#128184; Fund Pool",    roles:["head"]},
-    {id:"f-vendors",  label:"&#128101; Vendors",      roles:["head","manager"]},
-    {id:"f-progress", label:"&#128200; Work Progress",roles:["head","manager"]},
-    {id:"f-payments", label:"&#128197; Payments",     roles:["head","manager","finance"]},
-    {id:"f-expenses", label:"&#128179; Expenses",     roles:["head"]},
-    {id:"f-ta",       label:"&#128664; TA/DA",        roles:["head","manager","supervisor"]},
-    {id:"f-attend",   label:"&#128101; Attendance",   roles:["head","manager"]},
-    {id:"f-pl",       label:"&#128202; P&L",          roles:["head"]},
-    {id:"f-report",   label:"&#11015; Reports",       roles:["head"]}
+    {id:"fin-fund",   label:"&#128184; Fund Pool",    roles:["head","finance"]},
+    {id:"fin-vendor", label:"&#128101; Vendors",      roles:["head","manager","finance"]},
+    {id:"fin-work",   label:"&#128200; Work Progress",roles:["head","manager"]},
+    {id:"fin-pay",    label:"&#128197; Payments",     roles:["head","manager","finance"]},
+    {id:"fin-exp",    label:"&#128179; Expenses",     roles:["head","finance"]},
+    {id:"fin-ta",     label:"&#128664; TA / DA",      roles:["head","manager","supervisor","finance"]},
+    {id:"fin-att",    label:"&#128100; Attendance",   roles:["head","manager"]},
+    {id:"fin-report", label:"&#128202; Reports",      roles:["head","finance"]},
   ];
-  var tabs = allTabs.filter(function(t) { return t.roles.indexOf(role) >= 0; });
-  var h = "<div id='fin-wrap'>";
-  h += "<div class='itabs' id='fin-tabs'>";
+  var tabs = allTabs.filter(function(t){ return t.roles.indexOf(role) >= 0; });
+  if (!tabs.length) return "<div class='be'>Finance access nahi hai.</div>";
+
+  var firstTab = tabs[0].id;
+  _curFinTab = firstTab;
+
+  var h = "<div id='fin-tabs' class='itabs'>";
   tabs.forEach(function(t, i) {
-    h += "<button class='itab" + (i === 0 ? " active" : "") + "' data-tab='" + t.id + "'>" + t.label + "</button>";
+    h += "<button class='itab" + (i===0?" active":"") + "' data-tab='" + t.id + "'>" + t.label + "</button>";
   });
   h += "</div>";
   h += "<div id='fin-content'>";
-  if (tabs.length > 0) h += renderFinTab(tabs[0].id);
-  h += "</div></div>";
+  try { h += renderFinTab(firstTab); } catch(e) { h += "<div class='be'>Load error: "+e.message+"</div>"; }
+  h += "</div>";
   return h;
 }
 
 function renderFinTab(id) {
-  try {
-    if (id === "f-funds")    return renderFunds();
-    if (id === "f-vendors")  return renderVendors();
-    if (id === "f-progress") return renderProgress();
-    if (id === "f-payments") return renderPayments();
-    if (id === "f-expenses") return renderExpenses();
-    if (id === "f-ta")       return renderTA();
-    if (id === "f-attend")   return renderAttendFin();
-    if (id === "f-pl")       return renderPL();
-    if (id === "f-report")   return renderReports2();
-    return "<div class='card'>Tab not found</div>";
-  } catch(e) {
-    return "<div class='card'><div class='be'>Error: " + e.message + "</div></div>";
-  }
+  if (id === "fin-fund")   return rFund();
+  if (id === "fin-vendor") return rVendor();
+  if (id === "fin-work")   return rWork();
+  if (id === "fin-pay")    return rPay();
+  if (id === "fin-exp")    return rExp();
+  if (id === "fin-ta")     return rTA();
+  if (id === "fin-att")    return rAtt();
+  if (id === "fin-report") return rReport();
+  return "";
 }
 
-// Event delegation - handles all finance interactions
-document.addEventListener("click", function(e) {
-  // Tab switching
-  var tabBtn = e.target.closest("[data-tab]");
-  if (tabBtn) {
-    var tabId = tabBtn.getAttribute("data-tab");
-    if (tabId && tabId.startsWith("f-")) {
-      document.querySelectorAll("#fin-tabs .itab").forEach(function(b) { b.classList.remove("active"); });
-      tabBtn.classList.add("active");
-      var fc = document.getElementById("fin-content");
-      if (fc) fc.innerHTML = renderFinTab(tabId);
-      return;
-    }
-  }
-  // Modal open
-  var modalBtn = e.target.closest("[data-modal]");
-  if (modalBtn) { openFinModal(modalBtn.getAttribute("data-modal")); return; }
-  // Action buttons
-  var actBtn = e.target.closest("[data-action]");
-  if (actBtn) {
-    var act = actBtn.getAttribute("data-action");
-    var fid = actBtn.getAttribute("data-fid");
-    var col = actBtn.getAttribute("data-col");
-    if (act === "del")     { finConfirmDelete(col, fid); return; }
-    if (act === "approve") { finApprove(col, fid); return; }
-    if (act === "reject")  { finReject(col, fid); return; }
-    if (act === "paid")    { finMarkPaid(fid); return; }
-    if (act === "check")   { finTACheck(fid); return; }
-    if (act === "amend")   { finTAAmend(fid); return; }
-    if (act === "edit-vendor") { openEditVendor(fid); return; }
-    if (act === "export")  { exportReport(col); return; }
-  }
-});
-
-function finConfirmDelete(col, fid) {
-  if (!confirm("Delete this entry? It cannot be undone.")) return;
-  finDelete(col, fid);
-  showToast("Deleted!");
-  refreshFinTab();
-}
-
-function finApprove(col, fid) {
-  var arr = FIN[col];
-  var obj = arr.find(function(x) { return x._fid === fid; });
-  if (!obj) return;
-  obj.status = "approved";
-  obj.approvedBy = cu.name;
-  obj.approvedAt = new Date().toLocaleString("en-IN");
-  finSave(col, obj);
-  showToast("Approved!");
-  refreshFinTab();
-}
-
-function finReject(col, fid) {
-  var reason = prompt("Reason for rejection:");
-  if (!reason) return;
-  var arr = FIN[col];
-  var obj = arr.find(function(x) { return x._fid === fid; });
-  if (!obj) return;
-  obj.status = "rejected";
-  obj.rejectedBy = cu.name;
-  obj.rejectionReason = reason;
-  finSave(col, obj);
-  showToast("Rejected!");
-  refreshFinTab();
-}
-
-function finMarkPaid(fid) {
-  if (!confirm("Mark this payment as PAID?")) return;
-  var obj = FIN.payments.find(function(x) { return x._fid === fid; });
-  if (!obj) return;
-  obj.status = "paid";
-  obj.paidBy = cu.name;
-  obj.paidAt = new Date().toLocaleString("en-IN");
-  finSave("payments", obj);
-  showToast("Marked as Paid!");
-  refreshFinTab();
-}
-
-function finTACheck(fid) {
-  var obj = FIN.taEntries.find(function(x) { return x._fid === fid; });
-  if (!obj) return;
-  obj.status = "checked";
-  obj.checkedBy = cu.name;
-  finSave("taEntries", obj);
-  showToast("TA Checked!");
-  refreshFinTab();
-}
-
-function finTAAmend(fid) {
-  var obj = FIN.taEntries.find(function(x) { return x._fid === fid; });
-  if (!obj) return;
-  var newKm = prompt("Correct KM value (current: " + obj.km + "):");
-  if (!newKm || isNaN(newKm)) return;
-  obj.km = parseFloat(newKm);
-  obj.taAmount = obj.km * 2.5;
-  obj.status = "checked";
-  obj.amendedBy = cu.name;
-  finSave("taEntries", obj);
-  showToast("TA Amended & Checked!");
-  refreshFinTab();
-}
-
-function refreshFinTab() {
-  var active = document.querySelector("#fin-tabs .itab.active");
-  if (active) {
-    var fc = document.getElementById("fin-content");
-    if (fc) fc.innerHTML = renderFinTab(active.getAttribute("data-tab"));
-  }
-}
-
-// ── 1. FUND POOL ──
-function renderFunds() {
-  var funds = FIN.funds;
-  var totalIn = funds.reduce(function(a, f) { return a + (parseFloat(f.amount) || 0); }, 0);
-  var totalOut = FIN.payments.filter(function(p) { return p.status === "paid"; })
-    .reduce(function(a, p) { return a + (parseFloat(p.amount) || 0); }, 0);
-  var bal = totalIn - totalOut;
+// ============================================================
+// TAB 1 — FUND POOL
+// ============================================================
+function rFund() {
+  var funds = FIN.funds.filter(function(f){return !f.deleted;});
+  var totalIn = funds.reduce(function(a,f){return a+parseFloat(f.amount||0);},0);
+  var totalOut = FIN.payments.filter(function(p){return p.status==="paid"&&!p.deleted;})
+    .reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
 
   var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Fund Pool — RVNL Project</div>";
-  h += "<button class='btn btn-gold' data-modal='fund'>+ Add Fund</button></div>";
-
-  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr;margin-bottom:16px'>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtRs(totalIn) + "</div><div class='sl'>Total Received</div></div>";
-  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtRs(totalOut) + "</div><div class='sl'>Total Paid Out</div></div>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + fmtRs(bal) + "</div><div class='sl'>Balance</div></div>";
+  if (["head","finance"].indexOf(cu.role) >= 0) h += "<button class='btn btn-gold' data-modal='fund'>+ Add Fund</button>";
   h += "</div>";
-
-  if (funds.length === 0) {
-    h += "<div class='bi'>Koi fund entry nahi hai. Aug 2025 se backdate kar ke entry karo.</div>";
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr'>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtR(totalIn) + "</div><div class='sl'>Total Received</div></div>";
+  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtR(totalOut) + "</div><div class='sl'>Paid Out</div></div>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + fmtR(totalIn-totalOut) + "</div><div class='sl'>Balance</div></div>";
+  h += "</div>";
+  if (!funds.length) {
+    h += "<div class='bi'>Koi fund entry nahi. August 2025 se backdate kar sakte ho.</div>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Amount</th><th>Source</th><th>UTR / Ref</th><th>Remarks</th><th></th></tr></thead><tbody>";
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Amount</th><th>Source</th><th>Reference/UTR</th><th>Remarks</th><th></th></tr></thead><tbody>";
     funds.slice().reverse().forEach(function(f) {
-      h += "<tr><td style='font-size:11px'>" + f.date + "</td>";
-      h += "<td style='color:var(--ok);font-weight:700'>" + fmtRs(f.amount) + "</td>";
-      h += "<td style='font-size:11px'>" + f.source + "</td>";
-      h += "<td style='font-size:11px'>" + (f.ref || "—") + "</td>";
-      h += "<td style='font-size:11px'>" + (f.remarks || "—") + "</td>";
-      h += "<td><button class='btn btn-ghost' style='color:var(--red);padding:2px 8px;font-size:11px' data-action='del' data-col='funds' data-fid='" + f._fid + "'>Del</button></td></tr>";
+      h += "<tr><td>" + f.date + "</td>";
+      h += "<td style='font-weight:700;color:var(--ok)'>" + fmtR(f.amount) + "</td>";
+      h += "<td>" + (f.source||"") + "</td>";
+      h += "<td style='font-size:11px'>" + (f.ref||"-") + "</td>";
+      h += "<td style='font-size:11px'>" + (f.remarks||"-") + "</td>";
+      h += "<td><button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='funds' data-fid='" + f._fid + "'>Del</button></td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -4075,40 +4061,46 @@ function renderFunds() {
   return h;
 }
 
-// ── 2. VENDORS ──
-function renderVendors() {
-  var vendors = FIN.vendors;
-  var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
-  h += "<div class='ct'>Vendor Master</div>";
-  h += "<button class='btn btn-gold' data-modal='vendor'>+ Assign Vendor</button></div>";
+// ============================================================
+// TAB 2 — VENDOR MASTER
+// ============================================================
+function rVendor() {
+  var vendors = FIN.vendors.filter(function(v){return !v.deleted;});
+  var canEdit = cu.role === "head";
+  var canView = ["head","manager","finance"].indexOf(cu.role) >= 0;
 
-  if (vendors.length === 0) {
-    h += "<div class='bi'>Koi vendor assign nahi hai.</div>";
+  var h = "<div class='card'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>Vendor Master — Block wise</div>";
+  if (canEdit) h += "<button class='btn btn-gold' data-modal='vendor'>+ Assign Vendor</button>";
+  h += "</div>";
+  h += "<div class='bi' style='font-size:11px'>Green/Brown KM auto-loaded from Excel. Vendor rate × GIS KM = expected payment. Overpayment auto-flagged.</div>";
+
+  if (!vendors.length) {
+    h += "<div class='bw'>Koi vendor assign nahi hai.</div>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Block</th><th>Type</th><th>Vendor</th><th>Contact</th><th>Rate</th><th>GST</th><th>Status</th><th>Actions</th></tr></thead><tbody>";
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Block</th><th>Type</th><th>Vendor</th><th>Rate</th><th>Unit</th><th>GST</th><th>GIS KM/GP</th><th>Max Payable</th><th>Status</th><th></th></tr></thead><tbody>";
     vendors.forEach(function(v) {
-      var bl = BLOCKS.find(function(b) { return b.id === v.blockId; });
-      var gis = getGISByBlock(v.blockId);
-      var planKm = v.surveyType === "brown" ? (gis ? gis.brownKm : 0) : (gis ? gis.greenKm : 0);
-      var typeBadge = v.surveyType === "brown" ? "<span class='tag to'>BROWN</span>" : v.surveyType === "green" ? "<span class='tag tg'>GREEN</span>" : "<span class='tag ty'>GPON</span>";
-      var rateStr = "\u20b9" + v.rate + "/" + (v.unit || "km");
-      var gstStr = v.gst ? "+" + v.gstPct + "% GST" : "No GST";
+      var bl = BLOCKS.find(function(b){return b.id===v.blockId;});
+      var g = getGIS(v.blockId);
+      var gisQty = v.surveyType==="brown" ? g.brownKm : v.surveyType==="green" ? g.greenKm : g.gp;
+      var maxPay = gisQty * parseFloat(v.rate||0);
+      var typeTag = v.surveyType==="brown"?"to":v.surveyType==="green"?"tg":"ty";
+      var statusClr = v.active ? "var(--ok)" : "var(--gold)";
       h += "<tr>";
-      h += "<td><strong>" + (bl ? bl.name : v.blockId) + "</strong><br><span style='font-size:10px;color:var(--muted)'>" + (bl ? bl.district : "") + (planKm ? " | Plan: " + planKm + " km" : "") + "</span></td>";
-      h += "<td>" + typeBadge + "</td>";
-      h += "<td>" + v.vendorName + "</td>";
-      h += "<td style='font-size:11px'>" + (v.contact || "—") + "</td>";
-      h += "<td style='font-weight:700'>" + rateStr + "</td>";
-      h += "<td style='font-size:11px'>" + gstStr + "</td>";
-      h += "<td>" + statusBadge(v.status) + "</td>";
-      h += "<td><div style='display:flex;gap:4px'>";
-      if (cu.role === "head") {
-        if (v.status === "pending") h += "<button class='btn btn-green' style='padding:2px 8px;font-size:11px' data-action='approve' data-col='vendors' data-fid='" + v._fid + "'>Approve</button>";
-        h += "<button class='btn btn-ghost' style='padding:2px 8px;font-size:11px' data-action='edit-vendor' data-fid='" + v._fid + "'>Edit</button>";
-        h += "<button class='btn btn-ghost' style='color:var(--red);padding:2px 8px;font-size:11px' data-action='del' data-col='vendors' data-fid='" + v._fid + "'>Del</button>";
-      }
-      h += "</div></td></tr>";
+      h += "<td><strong>" + (bl?bl.name:v.blockId) + "</strong><br><span style='font-size:10px;color:var(--muted)'>" + (bl?bl.district:"") + "</span></td>";
+      h += "<td><span class='tag " + typeTag + "'>" + (v.surveyType||"").toUpperCase() + "</span></td>";
+      h += "<td>" + (v.vendorName||"-") + "<br><span style='font-size:10px;color:var(--muted)'>" + (v.contact||"") + "</span></td>";
+      h += "<td style='font-weight:700'>₹" + fmtN(v.rate) + "</td>";
+      h += "<td style='font-size:11px'>" + (v.unit||"") + "</td>";
+      h += "<td style='font-size:11px'>" + (v.hasGst?"GST "+v.gstPct+"%":"No GST") + "</td>";
+      h += "<td style='font-size:11px'>" + fmtN(gisQty) + " " + (v.surveyType==="gpon"?"GPs":"km") + "</td>";
+      h += "<td style='font-weight:700;color:var(--blue)'>" + fmtR(maxPay) + "</td>";
+      h += "<td><span style='color:" + statusClr + ";font-size:11px;font-weight:700'>" + (v.active?"Active":"Pending") + "</span></td>";
+      h += "<td style='display:flex;gap:4px;flex-wrap:wrap'>";
+      if (canEdit && !v.active) h += "<button class='btn btn-green' style='padding:3px 8px;font-size:11px' data-action='approve-vendor' data-fid='" + v._fid + "'>Approve</button>";
+      if (canEdit) h += "<button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='vendors' data-fid='" + v._fid + "'>Del</button>";
+      h += "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -4116,115 +4108,141 @@ function renderVendors() {
   return h;
 }
 
-// ── 3. WORK PROGRESS ──
-function renderProgress() {
+// ============================================================
+// TAB 3 — WORK PROGRESS
+// ============================================================
+function rWork() {
   var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Work Progress — Block wise</div>";
-  h += "<button class='btn btn-gold' data-modal='progress'>+ Add Work Entry</button></div>";
+  h += "<button class='btn btn-gold' data-modal='work'>+ Add Work Entry</button>";
+  h += "</div>";
+  h += "<div class='bi' style='font-size:11px'>GIS KM = contract KM from Excel. Done KM = vendor ne kya kiya. Extra KM flagged in red.</div>";
 
-  // Build block-wise progress summary
-  h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr>";
-  h += "<th>Block</th><th>District</th>";
-  h += "<th>&#127843; Brown Plan KM</th><th>Brown Done KM</th><th>Brown Status</th>";
-  h += "<th>&#127828; Green Plan KM</th><th>Green Done KM</th><th>Green Status</th>";
-  h += "<th>&#128225; GPs Plan</th><th>GPs Done</th>";
-  h += "</tr></thead><tbody>";
-
-  Object.keys(BLOCK_GIS_DATA).forEach(function(k) {
-    var gis = BLOCK_GIS_DATA[k];
-    // Find matching block in BLOCKS array
-    var bl = BLOCKS.find(function(b) { return b.name.toUpperCase() === gis.block.toUpperCase(); });
-    var blockId = bl ? bl.id : k;
-
-    // Get work entries for this block
-    var wEntries = FIN.workProgress.filter(function(w) { return w.blockId === blockId; });
-    var brownDone = wEntries.filter(function(w) { return w.type === "brown"; }).reduce(function(a, w) { return a + (parseFloat(w.kmDone) || 0); }, 0);
-    var greenDone = wEntries.filter(function(w) { return w.type === "green"; }).reduce(function(a, w) { return a + (parseFloat(w.kmDone) || 0); }, 0);
-    var gpsDone = wEntries.filter(function(w) { return w.type === "gpon"; }).reduce(function(a, w) { return a + (parseInt(w.gpsDone) || 0); }, 0);
-
-    var brownPlan = gis.brownKm || 0;
-    var greenPlan = gis.greenKm || 0;
-    var gpPlan = gis.gps || 0;
-
-    function progressCell(done, plan, unit) {
-      if (!plan) return "<td style='color:var(--muted);font-size:11px'>N/A</td><td style='color:var(--muted);font-size:11px'>—</td><td>—</td>";
-      var pct = plan > 0 ? (done / plan * 100) : 0;
-      var extra = done > plan;
-      var color = extra ? "var(--red)" : pct >= 100 ? "var(--ok)" : pct >= 50 ? "var(--blue)" : "var(--gold)";
-      var bar = "<div style='width:100%;background:var(--bg3);border-radius:3px;height:5px'><div style='width:" + Math.min(pct,100).toFixed(0) + "%;height:5px;background:" + color + ";border-radius:3px'></div></div>";
-      var doneStr = "<span style='color:" + color + ";font-weight:700'>" + done.toFixed(1) + "</span>";
-      if (extra) doneStr += " <span style='color:var(--red);font-size:10px'>\u26a0 +" + (done - plan).toFixed(1) + " extra</span>";
-      return "<td style='color:var(--muted);font-size:11px'>" + plan + " " + unit + "</td><td>" + doneStr + " " + unit + "<br>" + bar + "</td><td style='font-size:11px'>" + pct.toFixed(0) + "%</td>";
-    }
-
-    h += "<tr>";
-    h += "<td><strong>" + gis.block + "</strong></td>";
-    h += "<td style='font-size:11px'>" + gis.district + "</td>";
-    h += progressCell(brownDone, brownPlan, "km");
-    h += progressCell(greenDone, greenPlan, "km");
-    // GP cells
-    var gpPct = gpPlan > 0 ? (gpsDone / gpPlan * 100) : 0;
-    h += "<td style='font-size:11px'>" + gpPlan + "</td>";
-    h += "<td><span style='font-weight:700'>" + gpsDone + "</span></td>";
-    h += "</tr>";
+  // Build summary per block per type
+  var summary = {};
+  BLOCKS.forEach(function(b) {
+    if (b.status==="billed") return;
+    var g = getGIS(b.id);
+    ["brown","green","gpon"].forEach(function(type) {
+      var gisQty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+      if (!gisQty) return;
+      var key = b.id + "_" + type;
+      summary[key] = {bid:b.id, bname:b.name, district:b.district, type:type, gisQty:gisQty, doneQty:0, paidAmt:0, maxPayable:0};
+    });
   });
 
-  h += "</tbody></table></div></div>";
+  // Add work log entries
+  FIN.workLog.filter(function(w){return !w.deleted;}).forEach(function(w) {
+    var key = w.blockId + "_" + w.surveyType;
+    if (summary[key]) summary[key].doneQty += parseFloat(w.doneQty||0);
+  });
+
+  // Add vendor rates (include pending vendors too for visibility)
+  FIN.vendors.filter(function(v){return !v.deleted;}).forEach(function(v) {
+    var key = v.blockId + "_" + v.surveyType;
+    if (summary[key]) {
+      summary[key].maxPayable = summary[key].gisQty * parseFloat(v.rate||0);
+      summary[key].vendorName = v.vendorName || "";
+      summary[key].rate = parseFloat(v.rate||0);
+      summary[key].unit = v.unit || "km";
+      summary[key].vendorActive = v.active || false;
+    }
+  });
+
+  // Add paid amounts
+  FIN.payments.filter(function(p){return p.status==="paid"&&!p.deleted;}).forEach(function(p) {
+    var key = p.blockId + "_" + p.surveyType;
+    if (summary[key]) summary[key].paidAmt += parseFloat(p.amount||0);
+  });
+
+  var rows = Object.values(summary);
+  if (!rows.length) {
+    h += "<div class='bw'>Koi active block nahi hai.</div>";
+  } else {
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Block</th><th>Type</th><th>GIS KM/GP</th><th>Done KM/GP</th><th>% Complete</th><th>Extra?</th><th>Max Payable</th><th>Paid So Far</th><th>Balance</th></tr></thead><tbody>";
+    rows.forEach(function(r) {
+      var pct = r.gisQty>0 ? ((r.doneQty/r.gisQty)*100).toFixed(1) : "0.0";
+      var extra = r.doneQty > r.gisQty;
+      var extraQty = extra ? (r.doneQty - r.gisQty).toFixed(3) : 0;
+      var balance = r.maxPayable - r.paidAmt;
+      var overPaid = r.paidAmt > r.maxPayable;
+      var typeTag = r.type==="brown"?"to":r.type==="green"?"tg":"ty";
+      h += "<tr>";
+      h += "<td><strong>" + r.bname + "</strong><br><span style='font-size:10px;color:var(--muted)'>" + r.district + "</span></td>";
+      h += "<td><span class='tag " + typeTag + "'>" + r.type.toUpperCase() + "</span></td>";
+      h += "<td>" + fmtN(r.gisQty) + " " + (r.type==="gpon"?"GPs":"km") + (r.rate?"<br><span style='font-size:10px;color:var(--muted)'>₹"+r.rate+"/"+r.unit+"</span>":"") + "</td>";
+      h += "<td>" + fmtN(r.doneQty) + " " + (r.type==="gpon"?"GPs":"km") + (r.vendorName?"<br><span style='font-size:10px;color:var(--muted)'>"+r.vendorName+"</span>":"<br><span style='font-size:10px;color:var(--red)'>No vendor</span>") + "</td>";
+      h += "<td><div style='display:flex;align-items:center;gap:6px'><div style='width:60px;height:6px;background:var(--bg3);border-radius:3px'><div style='width:" + Math.min(100,parseFloat(pct)) + "%;height:6px;background:var(--ok);border-radius:3px'></div></div><span style='font-size:11px'>" + pct + "%</span></div></td>";
+      h += "<td>" + (extra?"<span class='tag tr'>+" + extraQty + " km EXTRA</span>":"<span style='color:var(--ok);font-size:11px'>OK</span>") + "</td>";
+      h += "<td>" + fmtR(r.maxPayable) + "</td>";
+      h += "<td style='color:" + (overPaid?"var(--red)":"var(--ok)") + ";font-weight:700'>" + fmtR(r.paidAmt) + (overPaid?" ⚠️":"") + "</td>";
+      h += "<td style='font-weight:700'>" + fmtR(Math.max(0,balance)) + "</td>";
+      h += "</tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  h += "</div>";
   return h;
 }
 
-// ── 4. PAYMENTS ──
-function renderPayments() {
-  var role = cu.role;
-  var payments = role === "finance"
-    ? FIN.payments.filter(function(p) { return p.status === "approved"; })
-    : FIN.payments;
+// ============================================================
+// TAB 4 — PAYMENTS
+// ============================================================
+function rPay() {
+  var canApprove = cu.role === "head";
+  var canRequest = ["head","manager"].indexOf(cu.role) >= 0;
+  var isFinance = cu.role === "finance";
 
-  var pending = payments.filter(function(p) { return p.status === "pending"; }).length;
-  var approved = payments.filter(function(p) { return p.status === "approved"; }).length;
-  var paid = payments.filter(function(p) { return p.status === "paid"; });
-  var paidAmt = paid.reduce(function(a, p) { return a + (parseFloat(p.amount) || 0); }, 0);
+  var payments = FIN.payments.filter(function(p){
+    if (p.deleted) return false;
+    if (isFinance) return p.status === "approved";
+    return true;
+  });
+
+  var pending = payments.filter(function(p){return p.status==="pending";});
+  var approved = payments.filter(function(p){return p.status==="approved";});
+  var paid = payments.filter(function(p){return p.status==="paid";});
+  var paidTotal = paid.reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
 
   var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
-  h += "<div class='ct'>Payments</div>";
-  if (role !== "finance") h += "<button class='btn btn-gold' data-modal='payment'>+ Payment Request</button>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>Payments" + (isFinance?" — Approved Only (Your View)":"") + "</div>";
+  if (canRequest) h += "<button class='btn btn-gold' data-modal='payment'>+ Payment Request</button>";
   h += "</div>";
 
-  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:14px'>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending + "</div><div class='sl'>Pending</div></div>";
-  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + approved + "</div><div class='sl'>Approved</div></div>";
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr'>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending.length + "</div><div class='sl'>Pending Approval</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + approved.length + "</div><div class='sl'>Approved</div></div>";
   h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + paid.length + "</div><div class='sl'>Paid</div></div>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtRs(paidAmt) + "</div><div class='sl'>Total Paid</div></div>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtR(paidTotal) + "</div><div class='sl'>Total Paid</div></div>";
   h += "</div>";
 
-  if (payments.length === 0) {
-    h += "<div class='bi'>Koi payment request nahi hai.</div>";
+  if (!payments.length) {
+    h += "<div class='bi'>Koi payment request nahi.</div>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Block</th><th>Vendor</th><th>Type</th><th>Stage</th><th>Work Done</th><th>Amount</th><th>Bill</th><th>Status</th><th>Actions</th></tr></thead><tbody>";
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Block</th><th>Vendor</th><th>Type</th><th>Milestone</th><th>Amount</th><th>Work Done</th><th>Bill</th><th>Status</th><th>Actions</th></tr></thead><tbody>";
     payments.slice().reverse().forEach(function(p) {
-      var bl = BLOCKS.find(function(b) { return b.id === p.blockId; });
+      var bl = BLOCKS.find(function(b){return b.id===p.blockId;});
+      var statusClr = p.status==="paid"?"var(--ok)":p.status==="approved"?"var(--blue)":p.status==="rejected"?"var(--red)":"var(--gold)";
+      var typeTag = p.surveyType==="brown"?"to":p.surveyType==="green"?"tg":"ty";
       h += "<tr>";
       h += "<td style='font-size:11px'>" + p.date + "</td>";
-      h += "<td><strong>" + (bl ? bl.name : p.blockId) + "</strong></td>";
-      h += "<td style='font-size:11px'>" + (p.vendorName || "—") + "</td>";
-      h += "<td><span class='tag " + (p.surveyType === "brown" ? "to" : p.surveyType === "green" ? "tg" : "ty") + "'>" + (p.surveyType || "").toUpperCase() + "</span></td>";
-      h += "<td style='font-size:11px'>" + (p.stage || "—") + "</td>";
-      h += "<td style='font-size:11px;max-width:120px'>" + (p.workDone || "—") + "</td>";
-      h += "<td style='font-weight:700'>" + fmtRs(p.amount) + "</td>";
-      h += "<td>" + billLink(p.billLink) + "</td>";
-      h += "<td>" + statusBadge(p.status) + "</td>";
+      h += "<td><strong>" + (bl?bl.name:p.blockId) + "</strong></td>";
+      h += "<td style='font-size:11px'>" + (p.vendorName||"-") + "</td>";
+      h += "<td><span class='tag " + typeTag + "'>" + (p.surveyType||"").toUpperCase() + "</span></td>";
+      h += "<td style='font-size:11px'>" + (p.milestone||"-") + "</td>";
+      h += "<td style='font-weight:700'>₹" + fmtN(p.amount) + "</td>";
+      h += "<td style='font-size:11px;max-width:100px'>" + (p.workDone||"-") + "</td>";
+      h += "<td>" + (p.billUrl?"<a href='" + p.billUrl + "' target='_blank' style='color:var(--blue);font-size:11px'>&#128196;</a>":"-") + "</td>";
+      h += "<td><span style='color:" + statusClr + ";font-size:11px;font-weight:700'>" + (p.status||"").toUpperCase() + "</span></td>";
       h += "<td><div style='display:flex;gap:3px;flex-wrap:wrap'>";
-      if (p.status === "pending" && cu.role === "head") {
-        h += "<button class='btn btn-green' style='padding:2px 6px;font-size:11px' data-action='approve' data-col='payments' data-fid='" + p._fid + "'>OK</button>";
-        h += "<button class='btn btn-red' style='padding:2px 6px;font-size:11px' data-action='reject' data-col='payments' data-fid='" + p._fid + "'>Reject</button>";
+      if (p.status==="pending" && canApprove) {
+        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='approve-payment' data-fid='" + p._fid + "'>&#10003;</button>";
+        h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px' data-action='reject-payment' data-fid='" + p._fid + "'>&#10007;</button>";
       }
-      if (p.status === "approved" && (cu.role === "finance" || cu.role === "head")) {
-        h += "<button class='btn btn-blue' style='padding:2px 6px;font-size:11px' data-action='paid' data-fid='" + p._fid + "'>Mark Paid</button>";
-      }
-      if (cu.role === "head") {
-        h += "<button class='btn btn-ghost' style='color:var(--red);padding:2px 6px;font-size:11px' data-action='del' data-col='payments' data-fid='" + p._fid + "'>Del</button>";
+      if (p.status==="approved" && (canApprove||isFinance)) {
+        h += "<button class='btn btn-blue' style='padding:3px 7px;font-size:11px' data-action='mark-paid' data-fid='" + p._fid + "'>Paid</button>";
       }
       h += "</div></td></tr>";
     });
@@ -4234,53 +4252,54 @@ function renderPayments() {
   return h;
 }
 
-// ── 5. EXPENSES ──
-function renderExpenses() {
-  var exps = FIN.expenses;
-  var total = exps.reduce(function(a, e) { return a + (parseFloat(e.amount) || 0); }, 0);
-
-  var catLabels = {
-    "salary-staff":"Office Staff Salary","salary-supervisor":"Supervisor Salary","salary-splicer":"Splicer Salary",
-    "office-rent":"Office Rent","guesthouse":"Guest House","site-stay":"Site Stay",
+// ============================================================
+// TAB 5 — EXPENSES
+// ============================================================
+function rExp() {
+  var cats = {
+    "salary-staff":"Office Staff Salary","salary-supervisor":"Supervisor Salary",
+    "salary-splicer":"Splicer Salary","office-rent":"Office Rent",
+    "guesthouse":"Guest House Rent","site-stay":"Site Stay",
     "tools-purchase":"Tools Purchase","tools-rent-monthly":"Equipment Rent (Monthly)",
-    "tools-rent-daily":"Equipment Rent (Daily)","tools-repair":"Repair/Maintenance",
-    "inhouse-daily":"Labour (Daily)","inhouse-per-pit":"Labour (Per Pit)","inhouse-splicer":"Splicer Work",
-    "facilitation":"Facilitation Charges","rfc":"RFC Prep","consumables":"Consumables","misc":"Misc"
+    "tools-rent-daily":"Equipment Rent (Daily)","tools-repair":"Repair & Maintenance",
+    "inhouse-daily":"In-house Labour (Daily)","inhouse-per-pit":"In-house Labour (Per Pit)",
+    "inhouse-splicer":"Splicer Site Work","facilitation":"Facilitation Charges",
+    "rfc":"RFC Preparation","consumables":"Consumables","misc":"Miscellaneous"
   };
 
+  var exps = FIN.expenses.filter(function(e){return !e.deleted;});
+  var total = exps.reduce(function(a,e){return a+parseFloat(e.amount||0);},0);
+
+  var byCat = {};
+  exps.forEach(function(e){ byCat[e.category]=(byCat[e.category]||0)+parseFloat(e.amount||0); });
+
   var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Expenses Tracker</div>";
-  h += "<button class='btn btn-gold' data-modal='expense'>+ Add Expense</button></div>";
+  if (cu.role === "head") h += "<button class='btn btn-gold' data-modal='expense'>+ Add Expense</button>";
+  h += "</div>";
 
-  // Category totals
-  var catTotals = {};
-  exps.forEach(function(e) {
-    catTotals[e.category] = (catTotals[e.category] || 0) + (parseFloat(e.amount) || 0);
-  });
-
-  h += "<div class='stats' style='grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:14px'>";
-  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtRs(total) + "</div><div class='sl'>Total Expenses</div></div>";
-  Object.keys(catTotals).forEach(function(k) {
-    h += "<div class='stat' style='--ac:var(--muted)'><div class='sv' style='font-size:16px'>" + fmtRs(catTotals[k]) + "</div><div class='sl'>" + (catLabels[k] || k) + "</div></div>";
+  h += "<div class='stats' style='margin-bottom:12px'>";
+  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtR(total) + "</div><div class='sl'>Total Expenses</div></div>";
+  Object.keys(byCat).forEach(function(k){
+    if (byCat[k] > 0) h += "<div class='stat' style='--ac:var(--muted)'><div class='sv' style='font-size:16px'>" + fmtR(byCat[k]) + "</div><div class='sl'>" + (cats[k]||k) + "</div></div>";
   });
   h += "</div>";
 
-  if (exps.length === 0) {
-    h += "<div class='bi'>Koi expense nahi hai.</div>";
+  if (!exps.length) {
+    h += "<div class='bi'>Koi expense entry nahi.</div>";
   } else {
     h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Block</th><th>Amount</th><th>GST</th><th>Bill</th><th></th></tr></thead><tbody>";
     exps.slice().reverse().forEach(function(e) {
-      var bl = e.blockId ? BLOCKS.find(function(b) { return b.id === e.blockId; }) : null;
-      h += "<tr>";
-      h += "<td style='font-size:11px'>" + e.date + "</td>";
-      h += "<td><span class='tag ty' style='font-size:10px'>" + (catLabels[e.category] || e.category) + "</span></td>";
-      h += "<td style='font-size:11px'>" + (e.description || "—") + "</td>";
-      h += "<td style='font-size:11px'>" + (bl ? bl.name : "General") + "</td>";
-      h += "<td style='color:var(--red);font-weight:700'>" + fmtRs(e.amount) + "</td>";
-      h += "<td style='font-size:11px'>" + (e.hasGst ? "GST " + e.gstPct + "%" : "—") + "</td>";
-      h += "<td>" + billLink(e.billLink) + "</td>";
-      h += "<td><button class='btn btn-ghost' style='color:var(--red);padding:2px 8px;font-size:11px' data-action='del' data-col='expenses' data-fid='" + e._fid + "'>Del</button></td></tr>";
+      var bl = e.blockId ? BLOCKS.find(function(b){return b.id===e.blockId;}) : null;
+      h += "<tr><td>" + e.date + "</td>";
+      h += "<td><span class='tag ty' style='font-size:10px'>" + (cats[e.category]||e.category) + "</span></td>";
+      h += "<td>" + (e.description||"-") + "</td>";
+      h += "<td style='font-size:11px'>" + (bl?bl.name:e.blockId||"General") + "</td>";
+      h += "<td style='font-weight:700;color:var(--red)'>₹" + fmtN(e.amount) + "</td>";
+      h += "<td style='font-size:11px'>" + (e.hasGst?"GST "+e.gstPct+"%":"No GST") + "</td>";
+      h += "<td>" + (e.billUrl?"<a href='" + e.billUrl + "' target='_blank' style='color:var(--blue);font-size:11px'>&#128196;</a>":"-") + "</td>";
+      h += "<td><button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='expenses' data-fid='" + e._fid + "'>Del</button></td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -4288,62 +4307,62 @@ function renderExpenses() {
   return h;
 }
 
-// ── 6. TA/DA ──
-function renderTA() {
-  var entries = cu.role === "supervisor"
-    ? FIN.taEntries.filter(function(t) { return t.supervisorName === cu.name; })
-    : FIN.taEntries;
+// ============================================================
+// TAB 6 — TA / DA
+// ============================================================
+function rTA() {
+  var entries = FIN.taLog.filter(function(t){
+    if (t.deleted) return false;
+    if (cu.role==="supervisor") return t.supervisorName===cu.name;
+    return true;
+  });
 
-  var approvedTA = entries.filter(function(t) { return t.status === "approved"; }).reduce(function(a, t) { return a + (parseFloat(t.taAmount) || 0); }, 0);
-  var approvedDA = entries.filter(function(t) { return t.status === "approved"; }).reduce(function(a, t) { return a + (parseFloat(t.daAmount) || 0); }, 0);
-  var pending = entries.filter(function(t) { return t.status === "pending"; }).length;
+  var approvedTA = entries.filter(function(t){return t.status==="approved";})
+    .reduce(function(a,t){return a+parseFloat(t.taAmount||0);},0);
+  var approvedDA = entries.filter(function(t){return t.status==="approved";})
+    .reduce(function(a,t){return a+parseFloat(t.daAmount||0);},0);
 
   var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
-  h += "<div class='ct'>TA / DA — Supervisor</div>";
-  h += "<button class='btn btn-gold' data-modal='ta'>+ Add TA/DA</button></div>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>TA / DA — Site Supervisors</div>";
+  h += "<button class='btn btn-gold' data-modal='ta'>+ Add Entry</button>";
+  h += "</div>";
+  h += "<div class='bi' style='font-size:11px'>TA @ Rs 2.5/km (odometer auto-calc). DA = fixed daily allowance. Anuj checks → Akshat approves.</div>";
 
-  h += "<div class='bi' style='margin-bottom:12px'>TA = Odometer km \u00d7 \u20b92.5/km (auto) &nbsp;|&nbsp; DA = Daily Allowance (fixed per day)</div>";
-
-  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:14px'>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending + "</div><div class='sl'>Pending</div></div>";
-  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + fmtRs(approvedTA) + "</div><div class='sl'>TA Approved</div></div>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtRs(approvedDA) + "</div><div class='sl'>DA Approved</div></div>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtRs(approvedTA + approvedDA) + "</div><div class='sl'>Total</div></div>";
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr'>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + fmtR(approvedTA) + "</div><div class='sl'>TA Approved</div></div>";
+  h += "<div class='stat' style='--ac:var(--teal,var(--ok))'><div class='sv'>" + fmtR(approvedDA) + "</div><div class='sl'>DA Approved</div></div>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + entries.filter(function(t){return t.status==="pending";}).length + "</div><div class='sl'>Pending</div></div>";
   h += "</div>";
 
-  if (entries.length === 0) {
-    h += "<div class='bi'>Koi TA/DA entry nahi hai.</div>";
+  if (!entries.length) {
+    h += "<div class='bi'>Koi TA/DA entry nahi.</div>";
   } else {
-    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Supervisor</th><th>Block</th><th>Start KM</th><th>End KM</th><th>KM</th><th>TA</th><th>DA Days</th><th>DA Amt</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>";
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Date</th><th>Supervisor</th><th>Block</th><th>Start KM</th><th>End KM</th><th>KM</th><th>TA</th><th>DA</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>";
     entries.slice().reverse().forEach(function(t) {
-      var bl = t.blockId ? BLOCKS.find(function(b) { return b.id === t.blockId; }) : null;
-      var km = (parseFloat(t.endKm) || 0) - (parseFloat(t.startKm) || 0);
-      if (km < 0) km = 0;
-      var ta = km * 2.5;
-      var da = parseFloat(t.daAmount) || 0;
-      h += "<tr>";
-      h += "<td style='font-size:11px'>" + t.date + "</td>";
-      h += "<td style='font-size:11px'>" + (t.supervisorName || "—") + "</td>";
-      h += "<td style='font-size:11px'>" + (bl ? bl.name : (t.blockId || "—")) + "</td>";
-      h += "<td style='font-size:11px'>" + (t.startKm || "—") + "</td>";
-      h += "<td style='font-size:11px'>" + (t.endKm || "—") + "</td>";
-      h += "<td style='font-weight:700'>" + km.toFixed(1) + " km</td>";
-      h += "<td style='color:var(--blue);font-weight:700'>" + fmtRs(ta) + "</td>";
-      h += "<td style='font-size:11px'>" + (t.daDays || 0) + " days</td>";
-      h += "<td style='color:var(--green,var(--ok));font-weight:700'>" + fmtRs(da) + "</td>";
-      h += "<td style='font-weight:700'>" + fmtRs(ta + da) + "</td>";
-      h += "<td>" + statusBadge(t.status) + "</td>";
-      h += "<td><div style='display:flex;gap:3px;flex-wrap:wrap'>";
-      if (t.status === "pending" && cu.role === "manager") {
-        h += "<button class='btn btn-blue' style='padding:2px 6px;font-size:11px' data-action='check' data-fid='" + t._fid + "'>Check</button>";
-        h += "<button class='btn btn-ghost' style='padding:2px 6px;font-size:11px' data-action='amend' data-fid='" + t._fid + "'>Amend</button>";
+      var bl = t.blockId ? BLOCKS.find(function(b){return b.id===t.blockId;}) : null;
+      var km = parseFloat(t.km||0);
+      var ta = parseFloat(t.taAmount||0);
+      var da = parseFloat(t.daAmount||0);
+      var statusClr = t.status==="approved"?"var(--ok)":t.status==="rejected"?"var(--red)":t.status==="checked"?"var(--blue)":"var(--gold)";
+      h += "<tr><td>" + t.date + "</td>";
+      h += "<td>" + (t.supervisorName||"-") + "</td>";
+      h += "<td style='font-size:11px'>" + (bl?bl.name:t.blockId||"-") + "</td>";
+      h += "<td>" + (t.startKm||0) + "</td><td>" + (t.endKm||0) + "</td>";
+      h += "<td style='font-weight:700'>" + km.toFixed(1) + "</td>";
+      h += "<td style='color:var(--blue)'>₹" + ta.toFixed(2) + "</td>";
+      h += "<td style='color:var(--ok)'>₹" + da.toFixed(2) + "</td>";
+      h += "<td style='font-weight:700'>₹" + (ta+da).toFixed(2) + "</td>";
+      h += "<td><span style='color:" + statusClr + ";font-size:11px;font-weight:700'>" + (t.status||"pending").toUpperCase() + "</span></td>";
+      h += "<td><div style='display:flex;gap:3px'>";
+      if (t.status==="pending" && cu.role==="manager") {
+        h += "<button class='btn btn-blue' style='padding:3px 7px;font-size:11px' data-action='ta-check' data-fid='" + t._fid + "'>Check</button>";
+        h += "<button class='btn btn-ghost' style='padding:3px 7px;font-size:11px' data-action='ta-amend' data-fid='" + t._fid + "'>Amend</button>";
       }
-      if ((t.status === "pending" || t.status === "checked") && cu.role === "head") {
-        h += "<button class='btn btn-green' style='padding:2px 6px;font-size:11px' data-action='approve' data-col='taEntries' data-fid='" + t._fid + "'>OK</button>";
-        h += "<button class='btn btn-red' style='padding:2px 6px;font-size:11px' data-action='reject' data-col='taEntries' data-fid='" + t._fid + "'>Reject</button>";
+      if ((t.status==="pending"||t.status==="checked") && cu.role==="head") {
+        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='ta-approve' data-fid='" + t._fid + "'>&#10003;</button>";
+        h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px' data-action='ta-reject' data-fid='" + t._fid + "'>&#10007;</button>";
       }
-      if (cu.role === "head") h += "<button class='btn btn-ghost' style='color:var(--red);padding:2px 6px;font-size:11px' data-action='del' data-col='taEntries' data-fid='" + t._fid + "'>Del</button>";
       h += "</div></td></tr>";
     });
     h += "</tbody></table></div>";
@@ -4352,185 +4371,133 @@ function renderTA() {
   return h;
 }
 
-// ── 7. ATTENDANCE (Finance view) ──
-function renderAttendFin() {
-  var records = FIN.attendance;
-  var h = "<div class='card'>";
-  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'>";
-  h += "<div class='ct'>Attendance Summary</div></div>";
-  h += "<div class='bi'>Punch In/Out se automatically salary calculate hogi. Har employee ki daily rate Team section mein set karo.</div>";
+// ============================================================
+// TAB 7 — ATTENDANCE
+// ============================================================
+function rAtt() {
+  var records = FIN.attendance.filter(function(a){return !a.deleted;});
+  // Head sees everyone, others see only self
+  if (cu.role !== "head" && cu.role !== "manager") {
+    records = records.filter(function(a){return a.name === cu.name;});
+  }
 
-  // Group by person
+  // Group by person-date
   var byPerson = {};
-  records.forEach(function(r) {
-    if (!byPerson[r.name]) byPerson[r.name] = {name: r.name, role: r.role, days: 0, rate: r.dailyRate || 0};
-    if (r.punchOut) byPerson[r.name].days += 1;
+  records.forEach(function(a) {
+    var key = a.name;
+    if (!byPerson[key]) byPerson[key] = {name:a.name, role:a.role, days:0, salary:parseFloat(a.dailyRate||0)*0, dailyRate:parseFloat(a.dailyRate||0)};
+    if (a.type==="punchout" && a.duration) byPerson[key].days += 1;
   });
 
-  if (Object.keys(byPerson).length === 0) {
-    h += "<div class='bi'>Koi attendance record nahi hai.</div>";
+  var h = "<div class='card'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>Attendance & Salary</div>";
+  h += "<div style='display:flex;gap:8px'>";
+  h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button>";
+  h += "</div></div>";
+  h += "<div class='bi' style='font-size:11px'>Punch In/Out se attendance track hoti hai. Daily rate × days present = salary due.</div>";
+
+  // Summary table
+  var people = Object.values(byPerson);
+  if (!people.length) {
+    h += "<div class='bw'>Koi attendance record nahi. Team members punch in karein.</div>";
   } else {
-    h += "<table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days Present</th><th>Daily Rate</th><th>Salary Due</th></tr></thead><tbody>";
-    Object.values(byPerson).forEach(function(p) {
-      var salary = p.days * p.rate;
-      h += "<tr><td><strong>" + p.name + "</strong></td><td style='font-size:11px'>" + p.role + "</td>";
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Role</th><th>Days Present</th><th>Daily Rate</th><th>Salary Due</th></tr></thead><tbody>";
+    people.forEach(function(p) {
+      var salaryDue = p.days * p.dailyRate;
+      h += "<tr><td><strong>" + p.name + "</strong></td>";
+      h += "<td style='font-size:11px'>" + (p.role||"-") + "</td>";
       h += "<td style='font-weight:700'>" + p.days + " days</td>";
-      h += "<td>" + fmtRs(p.rate) + "/day</td>";
-      h += "<td style='color:var(--gold);font-weight:700'>" + fmtRs(salary) + "</td></tr>";
+      h += "<td>₹" + p.dailyRate.toFixed(0) + "/day</td>";
+      h += "<td style='font-weight:700;color:var(--gold)'>₹" + salaryDue.toFixed(0) + "</td></tr>";
     });
-    h += "</tbody></table>";
+    h += "</tbody></table></div>";
   }
-  h += "</div>";
+
+  // Recent attendance log
+  h += "<div style='margin-top:16px'><div class='ct' style='font-size:14px'>Recent Attendance Log</div>";
+  var recent = records.slice(-30).reverse();
+  if (!recent.length) {
+    h += "<div style='color:var(--muted);font-size:13px'>No records.</div>";
+  } else {
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Name</th><th>Date</th><th>In</th><th>Out</th><th>Duration</th></tr></thead><tbody>";
+    recent.forEach(function(a) {
+      if (a.type !== "punchout") return;
+      h += "<tr><td>" + a.name + "</td><td>" + a.date + "</td><td>" + (a.punchIn||"-") + "</td><td>" + (a.punchOut||"-") + "</td><td>" + (a.duration||"-") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  h += "</div></div>";
   return h;
 }
 
-// ── 8. P&L ──
-function renderPL() {
-  var totalFunds = FIN.funds.reduce(function(a, f) { return a + (parseFloat(f.amount) || 0); }, 0);
-  var vendorPaid = FIN.payments.filter(function(p) { return p.status === "paid"; }).reduce(function(a, p) { return a + (parseFloat(p.amount) || 0); }, 0);
-  var expenses = FIN.expenses.reduce(function(a, e) { return a + (parseFloat(e.amount) || 0); }, 0);
-  var taDA = FIN.taEntries.filter(function(t) { return t.status === "approved"; }).reduce(function(a, t) { return a + (parseFloat(t.taAmount) || 0) + (parseFloat(t.daAmount) || 0); }, 0);
-  var totalCost = vendorPaid + expenses + taDA;
-  var profit = totalFunds - totalCost;
-  var margin = totalFunds > 0 ? (profit / totalFunds * 100).toFixed(1) : 0;
+// ============================================================
+// TAB 8 — REPORTS
+// ============================================================
+function rReport() {
+  var totalFunds = FIN.funds.filter(function(f){return !f.deleted;}).reduce(function(a,f){return a+parseFloat(f.amount||0);},0);
+  var totalPaid = FIN.payments.filter(function(p){return p.status==="paid"&&!p.deleted;}).reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
+  var totalExp = FIN.expenses.filter(function(e){return !e.deleted;}).reduce(function(a,e){return a+parseFloat(e.amount||0);},0);
+  var totalTA = FIN.taLog.filter(function(t){return t.status==="approved"&&!t.deleted;}).reduce(function(a,t){return a+parseFloat(t.taAmount||0)+parseFloat(t.daAmount||0);},0);
+  var totalCost = totalPaid + totalExp + totalTA;
+  var balance = totalFunds - totalCost;
 
-  var h = "<div class='card'><div class='ct' style='margin-bottom:16px'>P&L Summary — RVNL Project</div>";
-  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:20px'>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtRs(totalFunds) + "</div><div class='sl'>Revenue Received</div></div>";
-  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtRs(totalCost) + "</div><div class='sl'>Total Cost</div></div>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + fmtRs(profit) + "</div><div class='sl'>Net Profit</div></div>";
-  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + margin + "%</div><div class='sl'>Margin</div></div>";
+  var h = "<div class='card'>";
+  h += "<div class='ct'>P&L Summary</div>";
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:16px'>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtR(totalFunds) + "</div><div class='sl'>Fund Received</div></div>";
+  h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + fmtR(totalCost) + "</div><div class='sl'>Total Cost</div></div>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + fmtR(balance) + "</div><div class='sl'>Net Balance</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + (totalFunds>0?((balance/totalFunds)*100).toFixed(1):0) + "%</div><div class='sl'>Margin</div></div>";
   h += "</div>";
 
-  var rows = [
-    {label:"Vendor Payments (Brown+Green+GPON)", amt:vendorPaid, color:"var(--orange,#f90)"},
-    {label:"General Expenses", amt:expenses, color:"var(--red)"},
-    {label:"TA/DA (Approved)", amt:taDA, color:"var(--muted)"}
-  ];
-
-  h += "<div class='ct' style='font-size:14px;margin-bottom:10px'>Cost Breakup</div>";
   h += "<table class='tbl'><thead><tr><th>Category</th><th>Amount</th><th>% of Cost</th></tr></thead><tbody>";
-  rows.forEach(function(r) {
-    var pct = totalCost > 0 ? (r.amt / totalCost * 100).toFixed(1) : "0.0";
-    h += "<tr><td>" + r.label + "</td><td style='font-weight:700;color:" + r.color + "'>" + fmtRs(r.amt) + "</td>";
-    h += "<td><div style='display:flex;align-items:center;gap:8px'><div style='flex:1;height:6px;background:var(--bg3);border-radius:3px'><div style='width:" + pct + "%;height:6px;background:" + r.color + ";border-radius:3px'></div></div><span style='font-size:11px'>" + pct + "%</span></div></td></tr>";
+  var costRows = [
+    {label:"Vendor Payments", amt:totalPaid, clr:"var(--orange)"},
+    {label:"General Expenses", amt:totalExp, clr:"var(--red)"},
+    {label:"TA / DA", amt:totalTA, clr:"var(--muted)"},
+  ];
+  costRows.forEach(function(r) {
+    var pct = totalCost>0?((r.amt/totalCost)*100).toFixed(1):"0.0";
+    h += "<tr><td>" + r.label + "</td>";
+    h += "<td style='font-weight:700;color:" + r.clr + "'>₹" + fmtN(r.amt) + "</td>";
+    h += "<td><div style='display:flex;align-items:center;gap:8px'><div style='width:80px;height:6px;background:var(--bg3);border-radius:3px'><div style='width:" + Math.min(100,parseFloat(pct)) + "%;height:6px;background:" + r.clr + ";border-radius:3px'></div></div><span style='font-size:11px'>" + pct + "%</span></div></td></tr>";
   });
   h += "</tbody></table></div>";
+
+  h += "<div class='card' style='margin-top:0'>";
+  h += "<div class='ct'>Download Reports</div>";
+  h += "<div class='btns'>";
+  h += "<button class='btn btn-gold' onclick='downloadFinReport()'>&#128229; Download Excel Report (CA/Audit)</button>";
+  h += "<button class='btn btn-blue' onclick='downloadVendorReport()'>&#128229; Vendor-wise Report</button>";
+  h += "<button class='btn btn-ghost' onclick='downloadExpReport()'>&#128229; Expense Category Report</button>";
+  h += "</div></div>";
   return h;
 }
 
-// ── 9. REPORTS (Excel export) ──
-function renderReports2() {
-  var h = "<div class='card'><div class='ct' style='margin-bottom:16px'>Financial Reports — Download</div>";
-  var reports = [
-    {id:"fund-stmt",   label:"Fund Statement",        desc:"All fund receipts with dates and references"},
-    {id:"vendor-rpt",  label:"Vendor Payment Report",  desc:"Block-wise vendor payments — paid, pending, approved"},
-    {id:"expense-rpt", label:"Expense Report",         desc:"Category-wise all expenses with bill links"},
-    {id:"ta-rpt",      label:"TA/DA Report",           desc:"Supervisor-wise travel allowance summary"},
-    {id:"pl-rpt",      label:"P&L Statement",          desc:"Complete profit & loss for CA / audit"},
-    {id:"progress-rpt",label:"Work Progress Report",   desc:"Block-wise Brown/Green KM and GP completion status"}
-  ];
-  reports.forEach(function(r) {
-    h += "<div style='display:flex;justify-content:space-between;align-items:center;padding:12px;border:1px solid var(--b);border-radius:8px;margin-bottom:8px'>";
-    h += "<div><div style='font-weight:700'>" + r.label + "</div><div style='font-size:12px;color:var(--muted)'>" + r.desc + "</div></div>";
-    h += "<button class='btn btn-gold' data-action='export' data-col='" + r.id + "'>&#11015; Excel</button></div>";
-  });
-  h += "</div>";
-  return h;
-}
+// ============================================================
+// MODALS
+// ============================================================
+var _finModal = null;
 
-function exportReport(type) {
-  var rows = [];
-  var filename = "RVNL_" + type + "_" + todayStr() + ".csv";
-
-  if (type === "fund-stmt") {
-    rows.push(["Date","Amount","Source","Reference","Remarks"]);
-    FIN.funds.forEach(function(f) { rows.push([f.date, f.amount, f.source, f.ref || "", f.remarks || ""]); });
-  } else if (type === "vendor-rpt") {
-    rows.push(["Block","District","Type","Vendor","Rate","Unit","GST","Status"]);
-    FIN.vendors.forEach(function(v) {
-      var bl = BLOCKS.find(function(b) { return b.id === v.blockId; });
-      rows.push([bl ? bl.name : v.blockId, bl ? bl.district : "", v.surveyType, v.vendorName, v.rate, v.unit, v.gst ? v.gstPct + "%" : "No", v.status]);
-    });
-  } else if (type === "expense-rpt") {
-    rows.push(["Date","Category","Description","Block","Amount","GST","Bill Link"]);
-    FIN.expenses.forEach(function(e) {
-      var bl = e.blockId ? BLOCKS.find(function(b) { return b.id === e.blockId; }) : null;
-      rows.push([e.date, e.category, e.description, bl ? bl.name : "General", e.amount, e.hasGst ? e.gstPct + "%" : "—", e.billLink || ""]);
-    });
-  } else if (type === "ta-rpt") {
-    rows.push(["Date","Supervisor","Block","Start KM","End KM","KM","TA Amount","DA Days","DA Amount","Total","Status"]);
-    FIN.taEntries.forEach(function(t) {
-      var bl = t.blockId ? BLOCKS.find(function(b) { return b.id === t.blockId; }) : null;
-      var km = (parseFloat(t.endKm) || 0) - (parseFloat(t.startKm) || 0);
-      rows.push([t.date, t.supervisorName, bl ? bl.name : "", t.startKm, t.endKm, km.toFixed(1), (km * 2.5).toFixed(2), t.daDays || 0, t.daAmount || 0, ((km * 2.5) + (parseFloat(t.daAmount) || 0)).toFixed(2), t.status]);
-    });
-  } else if (type === "pl-rpt") {
-    var totalFunds = FIN.funds.reduce(function(a, f) { return a + (parseFloat(f.amount) || 0); }, 0);
-    var vendorPaid = FIN.payments.filter(function(p) { return p.status === "paid"; }).reduce(function(a, p) { return a + (parseFloat(p.amount) || 0); }, 0);
-    var expenses = FIN.expenses.reduce(function(a, e) { return a + (parseFloat(e.amount) || 0); }, 0);
-    var taDA = FIN.taEntries.filter(function(t) { return t.status === "approved"; }).reduce(function(a, t) { return a + (parseFloat(t.taAmount) || 0) + (parseFloat(t.daAmount) || 0); }, 0);
-    rows.push(["Category","Amount"]);
-    rows.push(["Total Fund Received", totalFunds]);
-    rows.push(["Vendor Payments (Paid)", vendorPaid]);
-    rows.push(["General Expenses", expenses]);
-    rows.push(["TA/DA", taDA]);
-    rows.push(["NET PROFIT", totalFunds - vendorPaid - expenses - taDA]);
-  } else if (type === "progress-rpt") {
-    rows.push(["Block","District","Brown Plan KM","Brown Done KM","Green Plan KM","Green Done KM","GP Plan","GP Done"]);
-    Object.keys(BLOCK_GIS_DATA).forEach(function(k) {
-      var gis = BLOCK_GIS_DATA[k];
-      var bl = BLOCKS.find(function(b) { return b.name.toUpperCase() === gis.block.toUpperCase(); });
-      var blockId = bl ? bl.id : k;
-      var wEntries = FIN.workProgress.filter(function(w) { return w.blockId === blockId; });
-      var brownDone = wEntries.filter(function(w) { return w.type === "brown"; }).reduce(function(a, w) { return a + (parseFloat(w.kmDone) || 0); }, 0);
-      var greenDone = wEntries.filter(function(w) { return w.type === "green"; }).reduce(function(a, w) { return a + (parseFloat(w.kmDone) || 0); }, 0);
-      var gpsDone = wEntries.filter(function(w) { return w.type === "gpon"; }).reduce(function(a, w) { return a + (parseInt(w.gpsDone) || 0); }, 0);
-      rows.push([gis.block, gis.district, gis.brownKm, brownDone.toFixed(1), gis.greenKm, greenDone.toFixed(1), gis.gps, gpsDone]);
-    });
-  }
-
-  var csv = rows.map(function(r) {
-    return r.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(",");
-  }).join("\n");
-
-  var blob = new Blob([csv], {type: "text/csv"});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-  showToast("Report downloaded!");
-}
-
-// ── MODAL SYSTEM ──
-function openFinModal(type) {
+function openFinModal(type, dataset) {
   var modal = document.getElementById("fin-modal");
   if (!modal) return;
   var title = document.getElementById("fin-modal-title");
   var body = document.getElementById("fin-modal-body");
-
-  var builders = {
-    fund: ["Add Fund Entry", buildFundForm],
-    vendor: ["Assign Vendor to Block", buildVendorForm],
-    progress: ["Add Work Progress Entry", buildProgressForm],
-    payment: ["New Payment Request", buildPaymentForm],
-    expense: ["Add Expense", buildExpenseForm2],
-    ta: ["TA / DA Entry", buildTAForm2]
+  var formMap = {
+    "fund": ["Add Fund Received", buildFundForm],
+    "vendor": ["Assign Vendor", buildVendorForm],
+    "work": ["Add Work Entry", buildWorkForm],
+    "payment": ["Payment Request", buildPayForm],
+    "expense": ["Add Expense", buildExpForm],
+    "ta": ["TA / DA Entry", buildTAForm],
+    "att-rate": ["Set Daily Salary Rates", buildAttRateForm],
   };
-
-  if (!builders[type]) return;
-  if (title) title.textContent = builders[type][0];
-  if (body) body.innerHTML = builders[type][1]();
-  modal.classList.add("open");
-}
-
-function openEditVendor(fid) {
-  var v = FIN.vendors.find(function(x) { return x._fid === fid; });
-  if (!v) return;
-  var modal = document.getElementById("fin-modal");
-  if (!modal) return;
-  document.getElementById("fin-modal-title").textContent = "Edit Vendor";
-  document.getElementById("fin-modal-body").innerHTML = buildVendorForm(v);
+  var cfg = formMap[type];
+  if (!cfg) return;
+  if (title) title.textContent = cfg[0];
+  if (body) body.innerHTML = cfg[1]();
   modal.classList.add("open");
 }
 
@@ -4539,357 +4506,1118 @@ function closeFinModal() {
   if (m) m.classList.remove("open");
 }
 
-// ── FORM BUILDERS ──
-function inp(id, type, placeholder, value, extra) {
-  return "<input class='finp' type='" + (type||"text") + "' id='" + id + "' placeholder='" + (placeholder||"") + "' value='" + (value||"") + "' " + (extra||"") + ">";
-}
-
-function sel(id, options, extra) {
-  var h = "<select class='fsel' id='" + id + "' " + (extra||"") + ">";
-  options.forEach(function(o) {
-    h += "<option value='" + o[0] + "'" + (o[2] ? " selected" : "") + ">" + o[1] + "</option>";
+// ── Form Builders ──
+function bOpts(filterBilled) {
+  var h = "<option value=''>-- Block select karo --</option>";
+  BLOCKS.forEach(function(b) {
+    if (filterBilled && b.status==="billed") return;
+    h += "<option value='" + b.id + "'>" + b.district + " - " + b.name + "</option>";
   });
-  return h + "</select>";
+  return h;
 }
-
-function frow(items) { return "<div class='frow'>" + items.join("") + "</div>"; }
-function fgrp(label, input) { return "<div class='fgrp'><label class='flbl'>" + label + "</label>" + input + "</div>"; }
 
 function buildFundForm() {
-  return frow([
-    fgrp("Date (backdate allowed from Aug 2025)", inp("ff-date","date","","",  'min="2025-08-01" value="' + todayStr() + '"')),
-    fgrp("Amount (Rs) *", inp("ff-amt","number","e.g. 2725000",""))
-  ]) +
-  frow([
-    fgrp("Source", sel("ff-src",[["RVNL - Bill Payment","RVNL - Bill Payment",true],["RVNL - GST Payment","RVNL - GST Payment"],["Advance","Advance"],["Other","Other"]])),
-    fgrp("UTR / Reference No.", inp("ff-ref","text","UTR or cheque number",""))
-  ]) +
-  frow([fgrp("Remarks", inp("ff-rem","text","e.g. 1st bill payment Jan 2026",""))]) +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveFund2()'>Save Fund Entry</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Date (Backdated OK)</label><input class='finp' type='date' id='ff-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Amount (Rs) *</label><input class='finp' type='number' id='ff-amount' placeholder='e.g. 2725000'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Source</label><select class='fsel' id='ff-source'><option>RVNL - Bill Payment</option><option>RVNL - GST Payment</option><option>Advance</option><option>Other</option></select></div><div class='fgrp'><label class='flbl'>Reference / UTR</label><input class='finp' id='ff-ref' placeholder='UTR or cheque number'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Remarks</label><input class='finp' id='ff-remarks' placeholder='e.g. 1st bill payment'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveFund()'>Save</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function buildVendorForm(existing) {
-  var e = existing || {};
-  var blockOpts = "<option value=''>-- Select Block --</option>";
-  BLOCKS.forEach(function(b) {
-    var gis = getGISByBlock(b.id);
-    var suffix = gis ? " | G:" + gis.greenKm + "km B:" + gis.brownKm + "km" : "";
-    blockOpts += "<option value='" + b.id + "'" + (e.blockId === b.id ? " selected" : "") + ">" + b.name + " (" + b.district + ")" + suffix + "</option>";
-  });
-  return "<div class='frow'><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fv-block'>" + blockOpts + "</select></div>" +
-  fgrp("Survey Type *", sel("fv-type",[["brown","Brown Field",e.surveyType==="brown"],["green","Green Field",e.surveyType==="green"],["gpon","GPON",e.surveyType==="gpon"]])) + "</div>" +
-  frow([
-    fgrp("Vendor Name *", inp("fv-name","text","Vendor / contractor name", e.vendorName||"")),
-    fgrp("Contact No.", inp("fv-contact","text","Mobile number", e.contact||""))
-  ]) +
-  frow([
-    fgrp("Rate (Rs) *", inp("fv-rate","number","e.g. 500", e.rate||"")),
-    fgrp("Unit", sel("fv-unit",[["km","per km",e.unit==="km"],["GP","per GP",e.unit==="GP"],["RKM","per RKM",e.unit==="RKM"],["lump","Lumpsum",e.unit==="lump"]]))
-  ]) +
-  frow([
-    fgrp("GST Applicable?", sel("fv-gst",[["no","No GST",!e.gst],["yes","Yes — GST Extra",e.gst]], "onchange=\"document.getElementById('fv-gstrow').style.display=this.value==='yes'?'flex':'none'\"")),
-    "<div class='fgrp' id='fv-gstrow' style='display:" + (e.gst?"flex":"none") + "'><label class='flbl'>GST %</label>" + sel("fv-gstpct",[["18","18%",true],["12","12%"],["5","5%"]]) + "</div>"
-  ]) +
-  frow([fgrp("Remarks", inp("fv-rem","text","Notes about this vendor", e.remarks||""))]) +
-  "<input type='hidden' id='fv-fid' value='" + (e._fid||"") + "'>" +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveVendor2()'>Save Vendor</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+function buildVendorForm() {
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fv-block' onchange='onVendorBlockChange()'>" + bOpts(true) + "</select></div><div class='fgrp'><label class='flbl'>Survey Type *</label><select class='fsel' id='fv-type' onchange='onVendorBlockChange()'><option value='brown'>Brown Field</option><option value='green'>Green Field</option><option value='gpon'>GPON</option></select></div></div>" +
+  "<div class='bi' id='fv-gis-info' style='font-size:11px'>Block select karo — GIS KM auto-show hoga.</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Vendor Name *</label><input class='finp' id='fv-name' placeholder='Vendor / contractor name'></div><div class='fgrp'><label class='flbl'>Contact No.</label><input class='finp' id='fv-contact' placeholder='Mobile'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Rate (Rs) *</label><input class='finp' type='number' id='fv-rate' placeholder='e.g. 5000' oninput='calcVendorMax()'></div><div class='fgrp'><label class='flbl'>Unit</label><select class='fsel' id='fv-unit'><option value='km'>per km (Brown/Green)</option><option value='GP'>per GP (GPON)</option><option value='RKM'>per RKM</option><option value='lump'>Lumpsum</option></select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>GST?</label><select class='fsel' id='fv-gst' onchange='document.getElementById(\"fv-gstrow\").style.display=this.value===\"yes\"?\"flex\":\"none\"'><option value='no'>No GST</option><option value='yes'>With GST</option></select></div><div class='fgrp' id='fv-gstrow' style='display:none'><label class='flbl'>GST %</label><select class='fsel' id='fv-gstpct'><option value='18'>18%</option><option value='12'>12%</option></select></div></div>" +
+  "<div class='bo' id='fv-maxpay' style='display:none'></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Remarks</label><input class='finp' id='fv-remarks' placeholder='Notes'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveVendor()'>Save" + (cu.role==="head"?" & Approve":"") + "</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function buildProgressForm() {
-  var blockOpts = "<option value=''>-- Select Block --</option>";
-  BLOCKS.forEach(function(b) {
-    var gis = getGISByBlock(b.id);
-    blockOpts += "<option value='" + b.id + "'>" + b.name + " (" + b.district + ")" + (gis ? " | B:" + gis.brownKm + " G:" + gis.greenKm : "") + "</option>";
-  });
-  return "<div class='frow'><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fp2-block' onchange='onProgressBlockChange()'>" + blockOpts + "</select></div>" +
-  fgrp("Survey Type *", sel("fp2-type",[["brown","Brown Field"],["green","Green Field"],["gpon","GPON"]], "onchange='onProgressTypeChange()'" )) + "</div>" +
-  "<div class='bi' id='fp2-plan-info' style='margin:8px 0'>Block select karo to plan data dikhega.</div>" +
-  frow([
-    fgrp("Date of Entry", inp("fp2-date","date","","",  'min="2025-08-01" value="' + todayStr() + '"')),
-    fgrp("Vendor Name", inp("fp2-vendor","text","Auto-fills from vendor master",""))
-  ]) +
-  "<div id='fp2-km-section'>" +
-  frow([
-    fgrp("KM Done (this entry) *", inp("fp2-km","number","e.g. 12.5","")),
-    fgrp("Cumulative KM done till date", inp("fp2-cumkm","number","Total done so far",""))
-  ]) + "</div>" +
-  "<div id='fp2-gp-section' style='display:none'>" +
-  frow([
-    fgrp("GPs Done (this entry) *", inp("fp2-gps","number","Number of GPs","")),
-    fgrp("Cumulative GPs done till date", inp("fp2-cumgps","number","Total GPs done so far",""))
-  ]) + "</div>" +
-  frow([fgrp("Remarks", inp("fp2-rem","text","Notes",""))]) +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveProgress2()'>Save Entry</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+function buildWorkForm() {
+  return "<div class='bw' style='font-size:11px'>Vendor ne kitna kaam kiya yeh enter karo. GIS KM se compare hoga automatically.</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fw-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fw-block' onchange='onWorkBlockChange()'>" + bOpts(false) + "</select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Survey Type *</label><select class='fsel' id='fw-type' onchange='onWorkBlockChange()'><option value='brown'>Brown Field</option><option value='green'>Green Field</option><option value='gpon'>GPON</option></select></div><div class='fgrp'><label class='flbl'>Vendor / Team</label><input class='finp' id='fw-vendor' placeholder='Auto-fills' readonly style='background:var(--bg2)'></div></div>" +
+  "<div class='bi' id='fw-gis-info' style='font-size:11px'>Block select karo</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Done KM / GPs (This Entry) *</label><input class='finp' type='number' id='fw-done' placeholder='e.g. 12.5' step='0.001' oninput='calcWorkTotal()'></div><div class='fgrp'><label class='flbl'>Cumulative Done (Auto)</label><input class='finp' id='fw-cumulative' readonly style='background:var(--bg2)' placeholder='Auto-calculated'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Remarks</label><input class='finp' id='fw-remarks' placeholder='e.g. Sector A completed'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveWork()'>Save Work Entry</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function buildPaymentForm() {
-  var blockOpts = "<option value=''>-- Select Block --</option>";
-  BLOCKS.forEach(function(b) { blockOpts += "<option value='" + b.id + "'>" + b.name + " (" + b.district + ")</option>"; });
-  return "<div class='frow'><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fpay-block' onchange='onPayBlockChange()'>" + blockOpts + "</select></div>" +
-  fgrp("Survey Type *", sel("fpay-type",[["brown","Brown Field"],["green","Green Field"],["gpon","GPON"]], "onchange='onPayBlockChange()'")) + "</div>" +
-  frow([
-    fgrp("Vendor Name", inp("fpay-vendor","text","Auto-fills from vendor master","")),
-    fgrp("Payment Stage", sel("fpay-stage",[
-      ["BF-40","BF 40% — Data submitted"],["BF-20a","BF 20% — Internal QC OK"],["BF-20b","BF 20% — RVNL approved"],["BF-20c","BF 20% — IE approved"],
-      ["GF-50a","GF 50% — Data verified"],["GF-50b","GF 50% — IE approved"],["GPON","GPON — Survey complete"]
-    ]))
-  ]) +
-  frow([
-    fgrp("Work Done Details *", inp("fpay-work","text","e.g. 45.6 km Brown done, 12 GPs surveyed","")),
-    fgrp("Amount Requested (Rs) *", inp("fpay-amt","number","0",""))
-  ]) +
-  frow([
-    fgrp("Bill / Invoice (Google Drive Link)", inp("fpay-bill","text","Paste Google Drive link","")),
-    fgrp("GST?", sel("fpay-gst",[["no","No GST",true],["yes","With GST"],["extra","GST Extra (billed separately)"]]))
-  ]) +
-  frow([fgrp("Date", inp("fpay-date","date","","", 'min="2025-08-01" value="' + todayStr() + '"'))]) +
-  "<div class='btns'><button class='btn btn-gold' onclick='savePayment2()'>Submit Request</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+function buildPayForm() {
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fp-block' onchange='onPayBlockChange()'>" + bOpts(false) + "</select></div><div class='fgrp'><label class='flbl'>Survey Type *</label><select class='fsel' id='fp-type' onchange='onPayBlockChange()'><option value='brown'>Brown Field</option><option value='green'>Green Field</option><option value='gpon'>GPON</option></select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Vendor (Auto)</label><input class='finp' id='fp-vendor' readonly style='background:var(--bg2)'></div><div class='fgrp'><label class='flbl'>Payment Milestone *</label><select class='fsel' id='fp-milestone' onchange='calcPayAmount()'><optgroup label='Brown Field'><option value='BF-40'>BF 40% — Data submitted</option><option value='BF-20a'>BF 20% — Internal QC approved</option><option value='BF-20b'>BF 20% — RVNL approved</option><option value='BF-20c'>BF 20% — IE approved</option></optgroup><optgroup label='Green Field'><option value='GF-50a'>GF 50% — Data verified internally</option><option value='GF-50b'>GF 50% — IE approved</option></optgroup><optgroup label='GPON'><option value='GPON-100'>GPON 100%</option></optgroup></select></div></div>" +
+  "<div class='bi' id='fp-calc-info'>Block + vendor assign hone ke baad auto-calculate hoga.</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Calculated Amount (Auto)</label><input class='finp' id='fp-calc-amount' readonly style='background:rgba(26,107,60,.08);font-weight:700'></div><div class='fgrp'><label class='flbl'>Final Amount (Rs) *</label><input class='finp' type='number' id='fp-amount' placeholder='Confirm or override'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Work Done Details *</label><textarea class='ftarea' id='fp-workdone' rows='2' placeholder='e.g. Brown field 45.6km completed, verified by Anuj'></textarea></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fp-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Bill (Google Drive Link)</label><input class='finp' id='fp-bill' placeholder='Drive link of bill/invoice'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='savePayment()'>Submit Request</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function buildExpenseForm2() {
-  var blockOpts = "<option value=''>General</option>";
-  BLOCKS.forEach(function(b) { blockOpts += "<option value='" + b.id + "'>" + b.name + " (" + b.district + ")</option>"; });
-  return frow([
-    fgrp("Date", inp("fe2-date","date","","", 'min="2025-08-01" value="' + todayStr() + '"')),
-    fgrp("Category *", sel("fe2-cat",[
-      ["salary-staff","Office Staff Salary"],["salary-supervisor","Supervisor Salary"],["salary-splicer","Splicer Salary"],
-      ["office-rent","Office Rent"],["guesthouse","Guest House Rent"],["site-stay","Site Stay"],
-      ["tools-purchase","Tools / Equipment Purchase"],["tools-rent-monthly","Equipment Rent (Monthly)"],
-      ["tools-rent-daily","Equipment Rent (Daily)"],["tools-repair","Repair & Maintenance"],
-      ["inhouse-daily","Labour (Daily Wages)"],["inhouse-per-pit","Labour (Per Pit)"],["inhouse-splicer","Splicer Site Work"],
-      ["facilitation","Facilitation Charges"],["rfc","RFC Preparation"],["consumables","Consumables"],["misc","Miscellaneous"]
-    ]))
-  ]) +
-  frow([
-    fgrp("Description *", inp("fe2-desc","text","e.g. Anuj Singh salary March 2026","")),
-    "<div class='fgrp'><label class='flbl'>Block / Site</label><select class='fsel' id='fe2-block'>" + blockOpts + "</select></div>"
-  ]) +
-  frow([
-    fgrp("Amount (Rs) *", inp("fe2-amt","number","0","")),
-    fgrp("Frequency", sel("fe2-freq",[["one-time","One-time",true],["monthly","Monthly"],["daily","Daily"],["per-pit","Per Pit"]]))
-  ]) +
-  frow([
-    fgrp("Bill / Invoice (Google Drive Link)", inp("fe2-bill","url","Paste Google Drive link","")),
-    fgrp("GST?", sel("fe2-gst",[["no","No GST",true],["yes","With GST (18%)"],["yes12","With GST (12%)"]]))
-  ]) +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveExpense2()'>Save Expense</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+function buildExpForm() {
+  var blkOpts = "<option value=''>General (not block specific)</option>";
+  BLOCKS.forEach(function(b){ blkOpts += "<option value='" + b.id + "'>" + b.district + " - " + b.name + "</option>"; });
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fe-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Category *</label><select class='fsel' id='fe-cat' onchange='onExpCat()'><optgroup label='Staff'><option value='salary-staff'>Office Staff Salary</option><option value='salary-supervisor'>Supervisor Salary</option><option value='salary-splicer'>Splicer Salary</option></optgroup><optgroup label='Rent'><option value='office-rent'>Office Rent</option><option value='guesthouse'>Guest House Rent</option><option value='site-stay'>Site Stay</option></optgroup><optgroup label='Tools'><option value='tools-purchase'>Tools/Equipment Purchase</option><option value='tools-rent-monthly'>Equipment Rent (Monthly)</option><option value='tools-rent-daily'>Equipment Rent (Daily)</option><option value='tools-repair'>Repair &amp; Maintenance</option></optgroup><optgroup label='Labour'><option value='inhouse-daily'>In-house Labour (Daily)</option><option value='inhouse-per-pit'>Labour (Per Pit)</option><option value='inhouse-splicer'>Splicer Site Work</option></optgroup><optgroup label='Other'><option value='facilitation'>Facilitation Charges</option><option value='rfc'>RFC Preparation</option><option value='consumables'>Consumables</option><option value='misc'>Miscellaneous</option></optgroup></select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Description *</label><input class='finp' id='fe-desc' placeholder='e.g. Anuj salary March 2026'></div><div class='fgrp'><label class='flbl'>Block/Site</label><select class='fsel' id='fe-block'>" + blkOpts + "</select></div></div>" +
+  "<div id='fe-tools-row' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>Item Name</label><input class='finp' id='fe-item' placeholder='e.g. OTDR Machine'></div><div class='fgrp'><label class='flbl'>Qty/Duration</label><input class='finp' id='fe-qty' placeholder='e.g. 1 unit / 30 days'></div></div></div>" +
+  "<div id='fe-labour-row' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>Workers</label><input class='finp' type='number' id='fe-workers' value='1' oninput='calcLabour()'></div><div class='fgrp'><label class='flbl'>Days/Pits</label><input class='finp' type='number' id='fe-units' oninput='calcLabour()'></div></div><div class='frow'><div class='fgrp'><label class='flbl'>Rate/Day or Pit</label><input class='finp' type='number' id='fe-urate' oninput='calcLabour()'></div><div class='fgrp'><label class='flbl'>Total (Auto)</label><input class='finp' id='fe-ltotal' readonly style='background:var(--bg2)'></div></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Amount (Rs) *</label><input class='finp' type='number' id='fe-amount' placeholder='0'></div><div class='fgrp'><label class='flbl'>Frequency</label><select class='fsel' id='fe-freq'><option value='one-time'>One-time</option><option value='monthly'>Monthly</option><option value='daily'>Daily</option><option value='per-pit'>Per Pit</option></select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Bill (Google Drive Link)</label><input class='finp' id='fe-bill' placeholder='Paste Drive link of bill'></div><div class='fgrp'><label class='flbl'>GST?</label><select class='fsel' id='fe-gst' onchange='document.getElementById(\"fe-gstrow\").style.display=this.value===\"yes\"?\"block\":\"none\"'><option value='no'>No GST</option><option value='yes'>With GST</option></select></div></div>" +
+  "<div id='fe-gstrow' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>GST %</label><select class='fsel' id='fe-gstpct'><option value='18'>18%</option><option value='12'>12%</option></select></div></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveExp()'>Save Expense</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function buildTAForm2() {
-  var blockOpts = "<option value=''>-- Select Block --</option>";
-  BLOCKS.forEach(function(b) { blockOpts += "<option value='" + b.id + "'>" + b.name + " (" + b.district + ")</option>"; });
+function buildTAForm() {
   var supOpts = "";
-  if (cu.role === "supervisor") {
-    supOpts = "<option value='" + cu.name + "'>" + cu.name + "</option>";
+  USERS.filter(function(u){return u.role==="supervisor";}).forEach(function(u){
+    supOpts += "<option value='" + u.name + "'>" + u.name + "</option>";
+  });
+  if (cu.role === "supervisor") supOpts = "<option value='" + cu.name + "'>" + cu.name + "</option>";
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='ft-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Supervisor</label><select class='fsel' id='ft-sup'>" + supOpts + "</select></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Block Visited</label><select class='fsel' id='ft-block'>" + bOpts(false) + "</select></div></div>" +
+  "<div class='sh'>TA — Travel Allowance (@ Rs 2.5/km)</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Start Odometer (KM)</label><input class='finp' type='number' id='ft-start' placeholder='e.g. 45678' oninput='calcTA()'></div><div class='fgrp'><label class='flbl'>End Odometer (KM)</label><input class='finp' type='number' id='ft-end' placeholder='e.g. 45823' oninput='calcTA()'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Distance (Auto)</label><input class='finp' id='ft-km' readonly style='background:var(--bg2)'></div><div class='fgrp'><label class='flbl'>TA Amount @ Rs 2.5/km (Auto)</label><input class='finp' id='ft-ta' readonly style='background:rgba(21,101,192,.08);font-weight:700'></div></div>" +
+  "<div class='sh'>DA — Daily Allowance</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>DA Amount (Rs)</label><input class='finp' type='number' id='ft-da' placeholder='e.g. 500 (fixed per day)'></div><div class='fgrp'><label class='flbl'>Total TA + DA (Auto)</label><input class='finp' id='ft-total' readonly style='background:rgba(26,107,60,.08);font-weight:700'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Remarks</label><input class='finp' id='ft-remarks' placeholder='Purpose of visit'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveTA()'>Submit</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+}
+
+function buildAttRateForm() {
+  var h = "<div class='bi'>Yahan daily salary rates set karo. Attendance se calculate hoga.</div>";
+  var roles = ["field","manager","review","supervisor","gis"];
+  roles.forEach(function(r) {
+    var members = USERS.filter(function(u){return u.role===r;});
+    members.forEach(function(u) {
+      h += "<div class='frow'><div class='fgrp'><label class='flbl'>" + u.name + " (" + r + ")</label><input class='finp' type='number' id='ar-" + u.name.replace(/ /g,"_") + "' placeholder='Daily rate Rs' value='" + (u.dailyRate||0) + "'></div></div>";
+    });
+  });
+  h += "<div class='btns'><button class='btn btn-gold' onclick='saveAttRates()'>Save Rates</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+  return h;
+}
+
+// ── Form Calculators ──
+function calcTA() {
+  var s = parseFloat(getV("ft-start"))||0;
+  var e = parseFloat(getV("ft-end"))||0;
+  var km = e>s ? e-s : 0;
+  var ta = km * 2.5;
+  var da = parseFloat(getV("ft-da"))||0;
+  setV("ft-km", km.toFixed(1) + " km");
+  setV("ft-ta", "Rs " + ta.toFixed(2));
+  setV("ft-total", "Rs " + (ta+da).toFixed(2));
+}
+function calcLabour() {
+  var w = parseFloat(getV("fe-workers"))||1;
+  var u = parseFloat(getV("fe-units"))||0;
+  var r = parseFloat(getV("fe-urate"))||0;
+  var t = w*u*r;
+  setV("fe-ltotal", "Rs " + t.toFixed(2));
+  setV("fe-amount", t);
+}
+function onExpCat() {
+  var cat = getV("fe-cat");
+  show("fe-tools-row", cat.startsWith("tools-"));
+  show("fe-labour-row", cat.startsWith("inhouse-"));
+}
+function onVendorBlockChange() {
+  var bid = getV("fv-block");
+  var type = getV("fv-type");
+  if (!bid) return;
+  var g = getGIS(bid);
+  var qty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  var unit = type==="gpon"?"GPs":"km";
+  var el = document.getElementById("fv-gis-info");
+  if (el) el.textContent = "GIS: " + qty.toFixed(3) + " " + unit + " | GP Count: " + g.gp;
+  calcVendorMax();
+}
+function calcVendorMax() {
+  var bid = getV("fv-block");
+  var type = getV("fv-type");
+  var rate = parseFloat(getV("fv-rate"))||0;
+  if (!bid||!rate) return;
+  var g = getGIS(bid);
+  var qty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  var max = qty * rate;
+  var el = document.getElementById("fv-maxpay");
+  if (el) { el.style.display="block"; el.textContent = "Max Payable (GIS qty × rate) = Rs " + max.toFixed(2); }
+}
+function onWorkBlockChange() {
+  var bid = getV("fw-block");
+  var type = getV("fw-type");
+  if (!bid) return;
+  var g = getGIS(bid);
+  var qty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  var unit = type==="gpon"?"GPs":"km";
+  var el = document.getElementById("fw-gis-info");
+  if (el) el.textContent = "GIS target: " + qty.toFixed(3) + " " + unit;
+  var v = getVendorForBlock(bid, type);
+  setV("fw-vendor", v?v.vendorName:"No vendor assigned");
+  calcWorkTotal();
+}
+function calcWorkTotal() {
+  var bid = getV("fw-block");
+  var type = getV("fw-type");
+  var done = parseFloat(getV("fw-done"))||0;
+  var prev = FIN.workLog.filter(function(w){return w.blockId===bid&&w.surveyType===type&&!w.deleted;})
+    .reduce(function(a,w){return a+parseFloat(w.doneQty||0);},0);
+  var cumulative = prev + done;
+  var g = getGIS(bid);
+  var gisQty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  var extra = cumulative > gisQty ? " ⚠️ EXTRA: +" + (cumulative-gisQty).toFixed(3) : "";
+  setV("fw-cumulative", cumulative.toFixed(3) + (type==="gpon"?" GPs":" km") + extra);
+}
+function onPayBlockChange() {
+  var bid = getV("fp-block");
+  var type = getV("fp-type");
+  if (!bid) return;
+  var v = getVendorForBlock(bid, type);
+  setV("fp-vendor", v?v.vendorName:"No vendor — assign first!");
+  calcPayAmount();
+}
+function calcPayAmount() {
+  var bid = getV("fp-block");
+  var type = getV("fp-type");
+  var milestone = getV("fp-milestone");
+  if (!bid||!type||!milestone) return;
+  var v = getVendorForBlock(bid, type);
+  if (!v) { document.getElementById("fp-calc-info").textContent = "Vendor assign karo pehle!"; return; }
+  var g = getGIS(bid);
+  var gisQty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  var maxPay = gisQty * parseFloat(v.rate||0);
+  var pctMap = {"BF-40":0.4,"BF-20a":0.2,"BF-20b":0.2,"BF-20c":0.2,"GF-50a":0.5,"GF-50b":0.5,"GPON-100":1.0};
+  var pct = pctMap[milestone] || 0;
+  var calcAmt = maxPay * pct;
+  setV("fp-calc-amount", "Rs " + calcAmt.toFixed(2));
+  setV("fp-amount", calcAmt.toFixed(2));
+  var el = document.getElementById("fp-calc-info");
+  if (el) el.textContent = "Max payable: Rs " + maxPay.toFixed(2) + " | This milestone (" + (pct*100) + "%): Rs " + calcAmt.toFixed(2);
+}
+
+// ── Save Functions ──
+function saveFund() {
+  var obj = {date:getV("ff-date"), amount:parseFloat(getV("ff-amount"))||0, source:getV("ff-source"), ref:getV("ff-ref"), remarks:getV("ff-remarks"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.amount) { alert("Amount required!"); return; }
+  FIN.funds.push(obj); finSave("funds", obj); closeFinModal(); showToast("Fund saved!"); refreshFinTab();
+}
+function saveVendor() {
+  var obj = {blockId:getV("fv-block"), surveyType:getV("fv-type"), vendorName:getV("fv-name").trim(), contact:getV("fv-contact"), rate:parseFloat(getV("fv-rate"))||0, unit:getV("fv-unit"), hasGst:getV("fv-gst")==="yes", gstPct:getV("fv-gstpct")||"18", remarks:getV("fv-remarks"), active:cu.role==="head", submittedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.blockId||!obj.vendorName) { alert("Block and vendor name required!"); return; }
+  FIN.vendors.push(obj); finSave("vendors", obj); closeFinModal(); showToast("Vendor saved!"); refreshFinTab();
+}
+function saveWork() {
+  var obj = {date:getV("fw-date"), blockId:getV("fw-block"), surveyType:getV("fw-type"), vendorName:getV("fw-vendor"), doneQty:parseFloat(getV("fw-done"))||0, remarks:getV("fw-remarks"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.blockId||!obj.doneQty) { alert("Block and quantity required!"); return; }
+  FIN.workLog.push(obj); finSave("workLog", obj); closeFinModal(); showToast("Work entry saved!"); refreshFinTab();
+}
+function savePayment() {
+  var obj = {date:getV("fp-date"), blockId:getV("fp-block"), surveyType:getV("fp-type"), vendorName:getV("fp-vendor"), milestone:getV("fp-milestone"), amount:parseFloat(getV("fp-amount"))||0, workDone:getV("fp-workdone"), billUrl:getV("fp-bill"), status:"pending", requestedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.blockId||!obj.amount||!obj.workDone) { alert("Block, amount, and work details required!"); return; }
+  FIN.payments.push(obj); finSave("payments", obj); closeFinModal(); showToast("Payment request submitted!"); refreshFinTab();
+}
+function saveExp() {
+  var obj = {date:getV("fe-date"), category:getV("fe-cat"), description:getV("fe-desc").trim(), blockId:getV("fe-block"), amount:parseFloat(getV("fe-amount"))||0, frequency:getV("fe-freq"), hasGst:getV("fe-gst")==="yes", gstPct:getV("fe-gstpct")||"18", billUrl:getV("fe-bill"), itemName:getV("fe-item"), qty:getV("fe-qty"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.description||!obj.amount) { alert("Description and amount required!"); return; }
+  FIN.expenses.push(obj); finSave("expenses", obj); closeFinModal(); showToast("Expense saved!"); refreshFinTab();
+}
+function saveTA() {
+  var s = parseFloat(getV("ft-start"))||0;
+  var e = parseFloat(getV("ft-end"))||0;
+  var km = e>s?e-s:0;
+  var da = parseFloat(getV("ft-da"))||0;
+  var obj = {date:getV("ft-date"), supervisorName:getV("ft-sup"), blockId:getV("ft-block"), startKm:s, endKm:e, km:km, taAmount:km*2.5, daAmount:da, remarks:getV("ft-remarks"), status:"pending", enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  if (!obj.supervisorName||km<=0) { alert("Supervisor and valid KM required!"); return; }
+  FIN.taLog.push(obj); finSave("taLog", obj); closeFinModal(); showToast("TA/DA submitted!"); refreshFinTab();
+}
+function saveAttRates() {
+  USERS.forEach(function(u) {
+    var el = document.getElementById("ar-" + u.name.replace(/ /g,"_"));
+    if (el) u.dailyRate = parseFloat(el.value)||0;
+  });
+  closeFinModal(); showToast("Daily rates saved!"); refreshFinTab();
+}
+
+// ── Report Downloads ──
+function downloadFinReport() {
+  var rows = [["COMENSOL ENTERPRISES — RVNL Finance Report"],["Date: " + new Date().toLocaleDateString("en-IN")],[]];
+  rows.push(["FUND POOL"],[]);
+  rows.push(["Date","Source","Reference","Amount","Remarks"]);
+  FIN.funds.filter(function(f){return !f.deleted;}).forEach(function(f){
+    rows.push([f.date,f.source||"",f.ref||"",f.amount||0,f.remarks||""]);
+  });
+  rows.push([],[]);
+  rows.push(["PAYMENTS"],[]);
+  rows.push(["Date","Block","Vendor","Type","Milestone","Amount","Status","Work Done"]);
+  FIN.payments.filter(function(p){return !p.deleted;}).forEach(function(p){
+    var bl = BLOCKS.find(function(b){return b.id===p.blockId;});
+    rows.push([p.date,bl?bl.name:p.blockId,p.vendorName||"",p.surveyType||"",p.milestone||"",p.amount||0,p.status||"",p.workDone||""]);
+  });
+  rows.push([],[]);
+  rows.push(["EXPENSES"],[]);
+  rows.push(["Date","Category","Description","Block","Amount","GST","Bill Link"]);
+  FIN.expenses.filter(function(e){return !e.deleted;}).forEach(function(e){
+    var bl = e.blockId?BLOCKS.find(function(b){return b.id===e.blockId;}):null;
+    rows.push([e.date,e.category||"",e.description||"",bl?bl.name:e.blockId||"General",e.amount||0,e.hasGst?"GST "+e.gstPct+"%":"No GST",e.billUrl||""]);
+  });
+  rows.push([],[]);
+  rows.push(["TA / DA"],[]);
+  rows.push(["Date","Supervisor","Block","KM","TA Amount","DA Amount","Total","Status"]);
+  FIN.taLog.filter(function(t){return !t.deleted;}).forEach(function(t){
+    var bl = t.blockId?BLOCKS.find(function(b){return b.id===t.blockId;}):null;
+    rows.push([t.date,t.supervisorName||"",bl?bl.name:t.blockId||"",t.km||0,t.taAmount||0,t.daAmount||0,(parseFloat(t.taAmount||0)+parseFloat(t.daAmount||0)).toFixed(2),t.status||""]);
+  });
+  exportRowsToCSV(rows, "Comensol_Finance_Report_" + new Date().toISOString().slice(0,10) + ".csv");
+}
+function downloadVendorReport() {
+  var rows = [["VENDOR-WISE PAYMENT REPORT"],[]];
+  rows.push(["Block","District","Survey Type","Vendor","GIS KM/GP","Rate","Max Payable","Total Paid","Balance","Status"]);
+  BLOCKS.forEach(function(b) {
+    ["brown","green","gpon"].forEach(function(type) {
+      var v = getVendorForBlock(b.id, type);
+      if (!v) return;
+      var g = getGIS(b.id);
+      var gisQty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+      var maxPay = gisQty * parseFloat(v.rate||0);
+      var paid = FIN.payments.filter(function(p){return p.blockId===b.id&&p.surveyType===type&&p.status==="paid"&&!p.deleted;}).reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
+      rows.push([b.name,b.district,type.toUpperCase(),v.vendorName||"",gisQty,v.rate||0,maxPay.toFixed(2),paid.toFixed(2),(maxPay-paid).toFixed(2),paid>maxPay?"OVERPAID ⚠️":"OK"]);
+    });
+  });
+  exportRowsToCSV(rows, "Vendor_Report_" + new Date().toISOString().slice(0,10) + ".csv");
+}
+function downloadExpReport() {
+  var rows = [["EXPENSE CATEGORY REPORT"],[]];
+  rows.push(["Category","Description","Date","Block","Amount","GST","Bill"]);
+  FIN.expenses.filter(function(e){return !e.deleted;}).sort(function(a,b){return a.category.localeCompare(b.category);}).forEach(function(e){
+    var bl = e.blockId?BLOCKS.find(function(b){return b.id===e.blockId;}):null;
+    rows.push([e.category||"",e.description||"",e.date,bl?bl.name:e.blockId||"General",e.amount||0,e.hasGst?"GST "+e.gstPct+"%":"No GST",e.billUrl||""]);
+  });
+  exportRowsToCSV(rows, "Expense_Report_" + new Date().toISOString().slice(0,10) + ".csv");
+}
+function exportRowsToCSV(rows, filename) {
+  var csv = rows.map(function(r){
+    return r.map(function(c){
+      var s = String(c).replace(/"/g,'""');
+      return s.includes(",") || s.includes('"') || s.includes('\n') ? '"'+s+'"' : s;
+    }).join(",");
+  }).join("\n");
+  var blob = new Blob([csv], {type:"text/csv"});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+  showToast("Report downloaded!");
+}
+
+
+
+
+// ============================================================
+// OFFLINE MODE — IndexedDB Queue + Service Worker
+// ============================================================
+
+var _swReg = null;
+var _isOnline = navigator.onLine;
+
+// Register Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(function(reg) {
+    _swReg = reg;
+    console.log("SW registered");
+  }).catch(function(e) { console.log("SW reg failed:", e); });
+
+  // Listen for sync messages from SW
+  navigator.serviceWorker.addEventListener('message', function(e) {
+    if (e.data && e.data.type === "SYNC_OFFLINE_QUEUE") {
+      processOfflineQueue();
+    }
+  });
+}
+
+// Online/Offline detection
+window.addEventListener('online', function() {
+  _isOnline = true;
+  showToast("🟢 Back online! Syncing data...");
+  updateConnBadge(true);
+  processOfflineQueue();
+});
+window.addEventListener('offline', function() {
+  _isOnline = false;
+  showToast("🔴 Offline mode — data will sync when connected");
+  updateConnBadge(false);
+});
+
+function updateConnBadge(online) {
+  var badge = document.getElementById("conn-badge");
+  if (badge) {
+    badge.textContent = online ? "Cloud Connected" : "⚠️ Offline";
+    badge.style.background = online ? "" : "rgba(200,50,50,0.8)";
+  }
+}
+
+// ── IndexedDB Offline Queue ──
+var _idb = null;
+
+function openIDB() {
+  return new Promise(function(resolve, reject) {
+    if (_idb) { resolve(_idb); return; }
+    var req = indexedDB.open("comensol-offline", 1);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains("queue")) {
+        db.createObjectStore("queue", { keyPath: "id", autoIncrement: true });
+      }
+    };
+    req.onsuccess = function(e) { _idb = e.target.result; resolve(_idb); };
+    req.onerror = function() { reject(req.error); };
+  });
+}
+
+function queueOffline(col, obj) {
+  openIDB().then(function(db) {
+    var tx = db.transaction("queue", "readwrite");
+    tx.objectStore("queue").add({ col: col, obj: obj, ts: Date.now() });
+  }).catch(function(e) { console.error("IDB queue err:", e); });
+}
+
+function processOfflineQueue() {
+  openIDB().then(function(db) {
+    var tx = db.transaction("queue", "readonly");
+    var req = tx.objectStore("queue").getAll();
+    req.onsuccess = function() {
+      var items = req.result;
+      if (!items.length) return;
+      console.log("Processing offline queue:", items.length, "items");
+      items.forEach(function(item) {
+        // Retry Firebase save
+        if (FB_ENABLED && window._db) {
+          window._dbl.addDoc(window._dbl.collection(window._db, "fin_" + item.col), item.obj)
+            .then(function() {
+              // Remove from queue on success
+              openIDB().then(function(db2) {
+                var tx2 = db2.transaction("queue", "readwrite");
+                tx2.objectStore("queue").delete(item.id);
+              });
+            }).catch(function(e) { console.log("Retry failed:", e); });
+        }
+      });
+      if (items.length > 0) showToast("✅ " + items.length + " offline entries synced!");
+    };
+  });
+}
+
+// Override finSave to handle offline
+var _origFinSave = window.finSave;
+function finSave(col, obj) {
+  if (!_isOnline) {
+    // Queue for later
+    queueOffline(col, Object.assign({}, obj));
+    showToast("📦 Saved offline — will sync when connected");
+    return;
+  }
+  if (!FB_ENABLED || !window._db) return;
+  obj.savedAt = new Date().toISOString();
+  if (obj._fid) {
+    window._dbl.setDoc(window._dbl.doc(window._db, "fin_"+col, obj._fid), obj)
+      .catch(function(e) {
+        // Network failed — queue it
+        queueOffline(col, obj);
+        showToast("📦 Saved offline — will sync when connected");
+      });
   } else {
-    USERS.filter(function(u) { return u.role === "supervisor"; }).forEach(function(u) {
-      supOpts += "<option value='" + u.name + "'>" + u.name + "</option>";
+    window._dbl.addDoc(window._dbl.collection(window._db, "fin_"+col), obj)
+      .then(function(r){ obj._fid = r.id; })
+      .catch(function(e) {
+        queueOffline(col, obj);
+        showToast("📦 Saved offline — will sync when connected");
+      });
+  }
+}
+
+// Check offline queue count on load
+function checkOfflineQueue() {
+  openIDB().then(function(db) {
+    var tx = db.transaction("queue", "readonly");
+    var req = tx.objectStore("queue").count();
+    req.onsuccess = function() {
+      var count = req.result;
+      if (count > 0) {
+        showToast("📦 " + count + " entries pending sync — connect to internet");
+      }
+    };
+  }).catch(function(){});
+}
+
+setTimeout(checkOfflineQueue, 3000);
+
+
+
+// ============================================================
+// IN-APP ALERTS / NOTIFICATIONS
+// ============================================================
+
+var _alerts = [];
+
+function addAlert(type, message, fromRole, toRole) {
+  var alert = {
+    id: Date.now().toString(),
+    type: type,  // 'payment', 'approval', 'review', 'info'
+    message: message,
+    fromRole: fromRole || cu.role,
+    toRole: toRole,  // which role should see this
+    ts: new Date().toLocaleString("en-IN"),
+    read: false
+  };
+  _alerts.push(alert);
+  // Save to Firebase
+  if (FB_ENABLED && window._db) {
+    window._dbl.addDoc(window._dbl.collection(window._db, "alerts"), alert)
+      .catch(function(e) { console.log("alert save err:", e); });
+  }
+  updAlertBadge();
+}
+
+function loadAlerts() {
+  if (!FB_ENABLED || !window._db) return;
+  var col = window._dbl.collection(window._db, "alerts");
+  window._dbl.onSnapshot(col, function(snap) {
+    _alerts = [];
+    snap.forEach(function(d) {
+      var a = Object.assign({id: d.id}, d.data());
+      // Show alerts targeted to current role or to "all"
+      if (!a.read && (a.toRole === cu.role || a.toRole === "all" || a.toRole === "head")) {
+        _alerts.push(a);
+      }
+    });
+    updAlertBadge();
+  });
+}
+
+function updAlertBadge() {
+  var unread = _alerts.filter(function(a){ return !a.read; }).length;
+  var badge = document.getElementById("alert-badge");
+  if (badge) {
+    badge.textContent = unread > 0 ? "🔔 " + unread : "🔔";
+    badge.style.color = unread > 0 ? "var(--gold)" : "";
+    badge.style.fontWeight = unread > 0 ? "700" : "";
+  }
+}
+
+function markAlertRead(id) {
+  var a = _alerts.find(function(x){ return x.id === id; });
+  if (a) {
+    a.read = true;
+    if (FB_ENABLED && window._db) {
+      window._dbl.setDoc(window._dbl.doc(window._db, "alerts", id), {read: true}, {merge: true});
+    }
+    updAlertBadge();
+  }
+}
+
+function showAlerts() {
+  var unread = _alerts.filter(function(a){ return !a.read; });
+  if (!unread.length) { showToast("No new alerts"); return; }
+
+  var modal = document.getElementById("fin-modal");
+  var title = document.getElementById("fin-modal-title");
+  var body = document.getElementById("fin-modal-body");
+  if (!modal) return;
+
+  title.textContent = "🔔 Alerts (" + unread.length + " new)";
+  var h = "";
+  unread.forEach(function(a) {
+    var icon = a.type==="payment"?"💸":a.type==="approval"?"✅":a.type==="review"?"🔍":"ℹ️";
+    h += "<div class='card' style='margin-bottom:8px;padding:12px'>";
+    h += "<div style='display:flex;justify-content:space-between'>";
+    h += "<span>" + icon + " <strong>" + a.message + "</strong></span>";
+    h += "<button class='btn btn-ghost' style='font-size:11px;padding:2px 8px' data-alert-id='" + a.id + "'>✓ Read</button>";
+    h += "</div>";
+    h += "<div style='font-size:11px;color:var(--muted);margin-top:4px'>" + a.ts + " | From: " + (a.fromRole||"system") + "</div>";
+    h += "</div>";
+  });
+  h += "<div class='btns'><button class='btn btn-ghost' onclick='closeFinModal()'>Close</button></div>";
+  body.innerHTML = h;
+  modal.classList.add("open");
+}
+
+// Auto-trigger alerts on key actions
+var _origSavePaymentRequest = window.savePayment;
+
+
+// ============================================================
+// FEATURE 1: DOCUMENT VAULT
+// Firebase Storage mein permanent docs — LOA, bills, WCC etc.
+// ============================================================
+
+var _docs = [];
+
+function loadDocs() {
+  if (!FB_ENABLED || !window._db) return;
+  window._dbl.onSnapshot(
+    window._dbl.collection(window._db, "documents"),
+    function(snap) {
+      _docs = [];
+      snap.forEach(function(d) {
+        var data = d.data();
+        if (!data.deleted) _docs.push(Object.assign({_fid: d.id}, data));
+      });
+      if (_curFinTab === "fin-docs") refreshFinTab();
+    }
+  );
+}
+
+function uploadDoc(file, meta) {
+  if (!window._st || !window._stl) {
+    showToast("Storage not ready — try again"); return;
+  }
+  var path = "docs/" + meta.category + "/" + Date.now() + "_" + file.name;
+  var storageRef = window._stl.ref(window._st, path);
+  showToast("Uploading...");
+  window._stl.uploadBytes(storageRef, file).then(function(snapshot) {
+    return window._stl.getDownloadURL(snapshot.ref);
+  }).then(function(url) {
+    var obj = {
+      name: meta.name || file.name,
+      category: meta.category,
+      blockId: meta.blockId || "",
+      loa: meta.loa || "",
+      tags: meta.tags || "",
+      url: url,
+      fileName: file.name,
+      fileSize: file.size,
+      uploadedBy: cu.name,
+      uploadedAt: new Date().toLocaleString("en-IN"),
+      date: meta.date || today()
+    };
+    window._dbl.addDoc(window._dbl.collection(window._db, "documents"), obj)
+      .then(function() {
+        showToast("✅ Document uploaded!");
+        closeFinModal();
+        refreshFinTab();
+      });
+  }).catch(function(e) {
+    showToast("Upload failed: " + e.message);
+  });
+}
+
+function rDocs() {
+  var cats = {
+    "loa": "LOA / Work Order",
+    "invoice": "Invoice / Bill",
+    "certificate": "Certificate (WCC/BG)",
+    "payment": "Payment Proof",
+    "survey": "Survey Document",
+    "legal": "Legal / Agreement",
+    "misc": "Miscellaneous"
+  };
+
+  var h = "<div class='card'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>&#128193; Document Vault</div>";
+  h += "<button class='btn btn-gold' data-modal='doc-upload'>+ Upload Document</button>";
+  h += "</div>";
+  h += "<div class='bi'>Sab important documents yahan save hain — permanently. Firebase Storage pe secured.</div>";
+
+  // Stats
+  h += "<div class='stats' style='margin-bottom:14px'>";
+  Object.keys(cats).forEach(function(k) {
+    var cnt = _docs.filter(function(d){return d.category===k;}).length;
+    if (cnt > 0) h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + cnt + "</div><div class='sl'>" + cats[k] + "</div></div>";
+  });
+  if (!_docs.length) h += "<div class='stat' style='--ac:var(--muted)'><div class='sv'>0</div><div class='sl'>Documents</div></div>";
+  h += "</div>";
+
+  // Filter bar
+  h += "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px'>";
+  h += "<button class='itab active' onclick='filterDocs(\"all\",this)'>All</button>";
+  Object.keys(cats).forEach(function(k) {
+    var cnt = _docs.filter(function(d){return d.category===k;}).length;
+    if (cnt > 0) h += "<button class='itab' onclick='filterDocs(\"" + k + "\",this)'>" + cats[k] + " (" + cnt + ")</button>";
+  });
+  h += "</div>";
+
+  h += "<div id='doc-list'>" + renderDocList("all") + "</div>";
+  h += "</div>";
+  return h;
+}
+
+function filterDocs(cat, btn) {
+  document.querySelectorAll("#fin-content .itab").forEach(function(b){b.classList.remove("active");});
+  if(btn) btn.classList.add("active");
+  var el = document.getElementById("doc-list");
+  if (el) el.innerHTML = renderDocList(cat);
+}
+
+function renderDocList(cat) {
+  var docs = cat === "all" ? _docs : _docs.filter(function(d){return d.category===cat;});
+  if (!docs.length) return "<div class='bi'>Koi document nahi.</div>";
+
+  var h = "<div style='display:grid;gap:10px'>";
+  docs.slice().reverse().forEach(function(d) {
+    var bl = d.blockId ? BLOCKS.find(function(b){return b.id===d.blockId;}) : null;
+    var ext = (d.fileName||"").split('.').pop().toLowerCase();
+    var icon = ext==="pdf"?"📄":ext==="xlsx"||ext==="xls"?"📊":ext==="docx"||ext==="doc"?"📝":"📎";
+    h += "<div class='card' style='padding:12px;display:flex;justify-content:space-between;align-items:center'>";
+    h += "<div style='flex:1'>";
+    h += "<div style='font-weight:700'>" + icon + " " + (d.name||d.fileName||"Document") + "</div>";
+    h += "<div style='font-size:11px;color:var(--muted);margin-top:3px'>";
+    h += (d.category||"") + (bl?" | "+bl.name:"") + (d.loa?" | "+d.loa:"");
+    h += " | " + (d.uploadedAt||d.date||"") + " | By: " + (d.uploadedBy||"-");
+    h += "</div>";
+    if (d.tags) h += "<div style='font-size:11px;color:var(--muted)'>" + d.tags + "</div>";
+    h += "</div>";
+    h += "<div style='display:flex;gap:8px;flex-shrink:0'>";
+    h += "<a href='" + d.url + "' target='_blank' class='btn btn-blue' style='padding:5px 12px;font-size:12px'>&#128065; View</a>";
+    h += "<a href='" + d.url + "' download class='btn btn-ghost' style='padding:5px 12px;font-size:12px'>&#8659; Download</a>";
+    if (cu.role === "head") h += "<button class='btn btn-ghost' style='padding:5px 10px;font-size:12px;color:var(--red)' data-action='del' data-col='documents' data-fid='" + d._fid + "'>🗑</button>";
+    h += "</div></div>";
+  });
+  h += "</div>";
+  return h;
+}
+
+function buildDocUploadForm() {
+  var blkOpts = "<option value=''>Not block-specific</option>";
+  BLOCKS.forEach(function(b){ blkOpts += "<option value='" + b.id + "'>" + b.district + " - " + b.name + "</option>"; });
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Document Name *</label><input class='finp' id='du-name' placeholder='e.g. LOA-C dated 24.10.2025'></div><div class='fgrp'><label class='flbl'>Category *</label><select class='fsel' id='du-cat'><option value='loa'>LOA / Work Order</option><option value='invoice'>Invoice / Bill</option><option value='certificate'>Certificate (WCC/BG)</option><option value='payment'>Payment Proof</option><option value='survey'>Survey Document</option><option value='legal'>Legal / Agreement</option><option value='misc'>Miscellaneous</option></select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>LOA Reference</label><select class='fsel' id='du-loa'><option value=''>Not LOA specific</option><option value='LOA-C'>LOA-C — Fatehpur</option><option value='LOA-G'>LOA-G — 41 Blocks</option></select></div><div class='fgrp'><label class='flbl'>Block (if block-specific)</label><select class='fsel' id='du-block'>" + blkOpts + "</select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='du-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Tags (optional)</label><input class='finp' id='du-tags' placeholder='e.g. BG release, FDR, invoice'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Select File * (PDF, Word, Excel, Image)</label><input class='finp' type='file' id='du-file' accept='.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png'></div></div>" +
+  "<div class='bo' style='font-size:12px'>File Firebase Storage pe permanently save hoga. Max size: 10MB.</div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveDoc()'>&#128228; Upload Document</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+}
+
+function saveDoc() {
+  var fileInput = document.getElementById("du-file");
+  if (!fileInput || !fileInput.files[0]) { alert("File select karo!"); return; }
+  var file = fileInput.files[0];
+  if (file.size > 10 * 1024 * 1024) { alert("File 10MB se badi hai!"); return; }
+  var name = document.getElementById("du-name") ? document.getElementById("du-name").value.trim() : "";
+  if (!name) { alert("Document name required!"); return; }
+  uploadDoc(file, {
+    name: name,
+    category: getV("du-cat"),
+    loa: getV("du-loa"),
+    blockId: getV("du-block"),
+    tags: getV("du-tags"),
+    date: getV("du-date")
+  });
+}
+
+// ============================================================
+// FEATURE 2: DAILY FIELD REPORT
+// Har din field team ka structured report
+// ============================================================
+
+var _fieldReports = [];
+
+function loadFieldReports() {
+  if (!FB_ENABLED || !window._db) return;
+  window._dbl.onSnapshot(
+    window._dbl.collection(window._db, "fieldReports"),
+    function(snap) {
+      _fieldReports = [];
+      snap.forEach(function(d) {
+        _fieldReports.push(Object.assign({_fid: d.id}, d.data()));
+      });
+      if (_curFinTab === "fin-fieldreport") refreshFinTab();
+    }
+  );
+}
+
+function saveFieldReport(obj) {
+  if (!FB_ENABLED || !window._db) {
+    _fieldReports.push(obj);
+    showToast("Report saved (local)");
+    return;
+  }
+  window._dbl.addDoc(window._dbl.collection(window._db, "fieldReports"), obj)
+    .then(function(r) { obj._fid = r.id; showToast("✅ Daily report submitted!"); })
+    .catch(function(e) { showToast("Save failed: " + e.message); });
+}
+
+function rFieldReport() {
+  var reports = _fieldReports.slice().sort(function(a,b){
+    return (b.date||"").localeCompare(a.date||"");
+  });
+
+  var canSubmit = ["head","manager","supervisor","field","review"].indexOf(cu.role) >= 0;
+
+  var h = "<div class='card'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
+  h += "<div class='ct'>&#128203; Daily Field Report</div>";
+  if (canSubmit) h += "<button class='btn btn-gold' data-modal='field-report'>+ Submit Today's Report</button>";
+  h += "</div>";
+  h += "<div class='bi'>Har din ka structured update — kahan kaam hua, kitna hua, koi problem. WhatsApp ki jagah yahan likhein.</div>";
+
+  // Today's reports
+  var todayStr = today();
+  var todayReps = reports.filter(function(r){return r.date===todayStr;});
+  if (todayReps.length) {
+    h += "<div style='margin-bottom:12px'><div class='ct' style='font-size:13px;color:var(--ok)'>&#10003; Today's Reports (" + todayStr + ")</div>";
+    todayReps.forEach(function(r) { h += renderReportCard(r, true); });
+    h += "</div>";
+  } else {
+    h += "<div class='bw'>Aaj ka koi report submit nahi hua (" + todayStr + ")</div>";
+  }
+
+  // Past reports
+  var pastReps = reports.filter(function(r){return r.date!==todayStr;});
+  if (pastReps.length) {
+    h += "<div class='ct' style='font-size:13px;margin-bottom:8px'>Past Reports</div>";
+    // Group by date
+    var byDate = {};
+    pastReps.forEach(function(r){ if(!byDate[r.date]) byDate[r.date]=[]; byDate[r.date].push(r); });
+    Object.keys(byDate).sort().reverse().slice(0,7).forEach(function(date) {
+      h += "<div style='margin-bottom:12px'><div style='font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px'>" + date + "</div>";
+      byDate[date].forEach(function(r){ h += renderReportCard(r, false); });
+      h += "</div>";
     });
   }
-  return frow([
-    fgrp("Date", inp("ft2-date","date","","", 'min="2025-08-01" value="' + todayStr() + '"')),
-    "<div class='fgrp'><label class='flbl'>Supervisor</label><select class='fsel' id='ft2-sup'>" + supOpts + "</select></div>"
-  ]) +
-  "<div class='fgrp'><label class='flbl'>Block / Site Visited</label><select class='fsel' id='ft2-block'>" + blockOpts + "</select></div>" +
-  "<div class='ct' style='font-size:13px;margin:12px 0 6px'>TA — Travel Allowance</div>" +
-  frow([
-    fgrp("Start Odometer (KM)", inp("ft2-start","number","e.g. 45678","", "oninput='calcTA2()'")),
-    fgrp("End Odometer (KM)", inp("ft2-end","number","e.g. 45823","", "oninput='calcTA2()'"))
-  ]) +
-  frow([
-    fgrp("Distance (KM) — Auto", "<input class='finp' id='ft2-km' readonly style='background:var(--bg2)' placeholder='Auto'>"),
-    fgrp("TA Amount @ Rs 2.5/km — Auto", "<input class='finp' id='ft2-ta' readonly style='background:rgba(26,107,60,.1);font-weight:700' placeholder='Auto'>")
-  ]) +
-  "<div class='ct' style='font-size:13px;margin:12px 0 6px'>DA — Daily Allowance</div>" +
-  frow([
-    fgrp("No. of Days", inp("ft2-days","number","Days on site","", "oninput='calcDA2()'")),
-    fgrp("DA Rate per Day (Rs)", inp("ft2-darate","number","e.g. 300","", "oninput='calcDA2()'"))
-  ]) +
-  frow([
-    fgrp("DA Amount — Auto", "<input class='finp' id='ft2-da' readonly style='background:rgba(26,107,60,.1);font-weight:700' placeholder='Auto'>"),
-    fgrp("Total (TA + DA)", "<input class='finp' id='ft2-total' readonly style='background:var(--bg2);font-weight:700' placeholder='Auto'>")
-  ]) +
-  frow([fgrp("Remarks / Purpose", inp("ft2-rem","text","Purpose of visit",""))]) +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveTA2()'>Submit TA/DA</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+  h += "</div>";
+  return h;
 }
 
-// ── AUTO CALCULATIONS ──
-function calcTA2() {
-  var s = parseFloat(document.getElementById("ft2-start") ? document.getElementById("ft2-start").value : 0) || 0;
-  var e = parseFloat(document.getElementById("ft2-end") ? document.getElementById("ft2-end").value : 0) || 0;
-  var km = e > s ? e - s : 0;
-  var ta = km * 2.5;
-  var da = parseFloat(document.getElementById("ft2-da") ? document.getElementById("ft2-da").value : 0) || 0;
-  if (document.getElementById("ft2-km")) document.getElementById("ft2-km").value = km.toFixed(1) + " km";
-  if (document.getElementById("ft2-ta")) document.getElementById("ft2-ta").value = "\u20b9" + ta.toFixed(2);
-  if (document.getElementById("ft2-total")) document.getElementById("ft2-total").value = "\u20b9" + (ta + da).toFixed(2);
+function renderReportCard(r, isToday) {
+  var bl = r.blockId ? BLOCKS.find(function(b){return b.id===r.blockId;}) : null;
+  var h = "<div class='card' style='padding:12px;margin-bottom:8px;border-left:3px solid " + (isToday?"var(--ok)":"var(--blue)") + "'>";
+  h += "<div style='display:flex;justify-content:space-between;align-items:start'>";
+  h += "<div><strong>" + (r.submittedBy||"Field Team") + "</strong>";
+  h += " <span style='font-size:11px;color:var(--muted)'>(" + (r.role||"field") + ")</span></div>";
+  h += "<span style='font-size:11px;color:var(--muted)'>" + (r.submittedAt||r.date||"") + "</span></div>";
+  h += "<div style='margin-top:8px;display:grid;gap:4px'>";
+  if (bl) h += "<div style='font-size:12px'>&#128205; Block: <strong>" + bl.name + ", " + bl.district + "</strong></div>";
+  if (r.workType) h += "<div style='font-size:12px'>&#128736; Work: <span class='tag " + (r.workType==="brown"?"to":r.workType==="green"?"tg":"ty") + "'>" + r.workType.toUpperCase() + "</span></div>";
+  if (r.kmDone) h += "<div style='font-size:12px'>&#128200; Done today: <strong>" + r.kmDone + " " + (r.workType==="gpon"?"GPs":"km") + "</strong></div>";
+  if (r.spansDone) h += "<div style='font-size:12px'>&#128336; Spans: <strong>" + r.spansDone + "</strong></div>";
+  if (r.remarks) h += "<div style='font-size:12px;background:var(--bg2);padding:6px 10px;border-radius:4px;margin-top:4px'>&#128172; " + r.remarks + "</div>";
+  if (r.problems) h += "<div style='font-size:12px;background:rgba(200,50,50,.08);padding:6px 10px;border-radius:4px;margin-top:4px;color:var(--red)'>&#9888; Problem: " + r.problems + "</div>";
+  if (r.teamCount) h += "<div style='font-size:12px'>&#128100; Team size: " + r.teamCount + " members</div>";
+  h += "</div></div>";
+  return h;
 }
 
-function calcDA2() {
-  var days = parseFloat(document.getElementById("ft2-days") ? document.getElementById("ft2-days").value : 0) || 0;
-  var rate = parseFloat(document.getElementById("ft2-darate") ? document.getElementById("ft2-darate").value : 0) || 0;
-  var da = days * rate;
-  var ta = parseFloat(document.getElementById("ft2-ta") ? document.getElementById("ft2-ta").value.replace(/[^\d.]/g,"") : 0) || 0;
-  if (document.getElementById("ft2-da")) document.getElementById("ft2-da").value = "\u20b9" + da.toFixed(2);
-  if (document.getElementById("ft2-total")) document.getElementById("ft2-total").value = "\u20b9" + (ta + da).toFixed(2);
+function buildFieldReportForm() {
+  var blkOpts = "<option value=''>-- Block select karo --</option>";
+  BLOCKS.forEach(function(b){ blkOpts += "<option value='" + b.id + "'>" + b.district + " - " + b.name + "</option>"; });
+  return "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fr-date' value='" + today() + "'></div><div class='fgrp'><label class='flbl'>Block *</label><select class='fsel' id='fr-block'>" + blkOpts + "</select></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Work Type</label><select class='fsel' id='fr-type'><option value='brown'>Brown Field Survey</option><option value='green'>Green Field Survey</option><option value='gpon'>GPON Survey</option><option value='jc'>JC Work</option><option value='other'>Other</option></select></div><div class='fgrp'><label class='flbl'>Team Size (No. of members)</label><input class='finp' type='number' id='fr-team' value='4' min='1'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>KM / GPs Done Today</label><input class='finp' type='number' id='fr-km' placeholder='e.g. 8.5' step='0.001'></div><div class='fgrp'><label class='flbl'>Spans Completed</label><input class='finp' type='number' id='fr-spans' placeholder='No. of spans'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Work Details / Remarks *</label><textarea class='ftarea' id='fr-remarks' rows='3' placeholder='Aaj kahan se kahan tak kaam hua, konsa area cover kiya...'></textarea></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Problems / Issues (if any)</label><textarea class='ftarea' id='fr-problems' rows='2' placeholder='Koi road blockage, landowner problem, equipment issue...'></textarea></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Start Time</label><input class='finp' type='time' id='fr-start'></div><div class='fgrp'><label class='flbl'>End Time</label><input class='finp' type='time' id='fr-end'></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='submitFieldReport()'>Submit Report</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
 }
 
-function onProgressBlockChange() {
-  var bid = document.getElementById("fp2-block") ? document.getElementById("fp2-block").value : "";
-  var type = document.getElementById("fp2-type") ? document.getElementById("fp2-type").value : "";
-  if (!bid) return;
-  var gis = getGISByBlock(bid);
-  var info = document.getElementById("fp2-plan-info");
-  if (info && gis) {
-    info.innerHTML = "\uD83D\uDCCB Plan: <strong>Brown " + gis.brownKm + " km</strong> | <strong>Green " + gis.greenKm + " km</strong> | <strong>" + gis.gps + " GPs</strong>";
+function submitFieldReport() {
+  var blockId = getV("fr-block");
+  var remarks = getV("fr-remarks").trim();
+  if (!blockId || !remarks) { alert("Block aur remarks required!"); return; }
+  var obj = {
+    date: getV("fr-date"),
+    blockId: blockId,
+    workType: getV("fr-type"),
+    teamCount: getV("fr-team"),
+    kmDone: getV("fr-km"),
+    spansDone: getV("fr-spans"),
+    remarks: remarks,
+    problems: getV("fr-problems"),
+    startTime: getV("fr-start"),
+    endTime: getV("fr-end"),
+    submittedBy: cu.name,
+    role: cu.role,
+    submittedAt: new Date().toLocaleString("en-IN")
+  };
+  saveFieldReport(obj);
+  closeFinModal();
+  refreshFinTab();
+}
+
+// ============================================================
+// FEATURE 3: SECURE PASSWORD SYSTEM
+// SHA-256 hash based — no plaintext passwords in memory
+// (Firebase Auth migration ke bina, better security)
+// ============================================================
+
+async function hashPassword(pwd) {
+  if (!window.crypto || !window.crypto.subtle) return pwd; // fallback
+  var encoder = new TextEncoder();
+  var data = encoder.encode(pwd + "comensol_salt_2026");
+  var hash = await window.crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(function(b){
+    return b.toString(16).padStart(2,"0");
+  }).join("");
+}
+
+// Store hashed passwords in Firebase (one-time migration)
+function migratePasswordsToHash() {
+  if (!FB_ENABLED || !window._db) return;
+  USERS.forEach(function(u) {
+    if (!u._pwdHashed) {
+      hashPassword(u.pwd).then(function(hash) {
+        // Save hashed pwd to Firebase user record
+        if (u._fid) {
+          window._dbl.setDoc(
+            window._dbl.doc(window._db, "users", u._fid),
+            { pwdHash: hash, role: u.role, name: u.name },
+            { merge: true }
+          );
+        }
+      });
+    }
+  });
+}
+
+// Enhanced doLogin — check Firebase users collection first
+async function doLoginSecure(role, name, pwd) {
+  // First try standard login
+  var user = USERS.find(function(u) {
+    return u.role===role && u.name===name && u.pwd===pwd;
+  });
+  if (user) { return user; }
+
+  // Try hashed password from Firebase
+  if (FB_ENABLED && window._db) {
+    try {
+      var hash = await hashPassword(pwd);
+      var snap = await window._dbl.getDocs(
+        window._dbl.collection(window._db, "users")
+      );
+      var fbUser = null;
+      snap.forEach(function(d) {
+        var data = d.data();
+        if (data.role===role && data.name===name && data.pwdHash===hash) {
+          fbUser = Object.assign({_fid:d.id}, data);
+        }
+      });
+      return fbUser;
+    } catch(e) { return null; }
   }
-  // Auto-fill vendor
-  var vs = FIN.vendors.filter(function(v) { return v.blockId === bid && v.surveyType === type && v.status === "approved"; });
-  if (vs.length > 0 && document.getElementById("fp2-vendor")) document.getElementById("fp2-vendor").value = vs[0].vendorName;
+  return null;
 }
 
-function onProgressTypeChange() {
-  var type = document.getElementById("fp2-type") ? document.getElementById("fp2-type").value : "";
-  var kmSec = document.getElementById("fp2-km-section");
-  var gpSec = document.getElementById("fp2-gp-section");
-  if (kmSec) kmSec.style.display = type === "gpon" ? "none" : "block";
-  if (gpSec) gpSec.style.display = type === "gpon" ? "block" : "none";
-  onProgressBlockChange();
+// ============================================================
+// FEATURE 4: GIS MAP — Survey Data Integration
+// Link survey submissions to map markers
+// ============================================================
+
+function enhanceGISMap() {
+  // Add survey data overlay to existing map
+  if (!window._gisMap) return;
+  var map = window._gisMap;
+
+  // Clear existing survey markers
+  if (window._surveyMarkers) {
+    window._surveyMarkers.forEach(function(m){ map.removeLayer(m); });
+  }
+  window._surveyMarkers = [];
+
+  // Add block markers with survey status
+  BLOCKS.forEach(function(b) {
+    var g = BLOCK_GIS[b.id];
+    if (!g) return;
+
+    // Find block submissions
+    var blockSubs = allSubs.filter(function(s){ return s.block===b.name || s.blockId===b.id; });
+
+    // Status color
+    var color = b.status==="billed"?"#2e7d32":
+                b.status==="approved"?"#1565c0":
+                b.status==="wip"||blockSubs.length?"#f57c00":"#757575";
+
+    // Try to get lat/long from submissions
+    var lat = null, lng = null;
+    if (blockSubs.length && blockSubs[0].latFrom) {
+      lat = parseFloat(blockSubs[0].latFrom);
+      lng = parseFloat(blockSubs[0].lonFrom || blockSubs[0].latTo);
+    }
+
+    if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+      var marker = L.circleMarker([lat, lng], {
+        radius: 10, fillColor: color, color: "#fff",
+        weight: 2, opacity: 1, fillOpacity: 0.9
+      }).addTo(map);
+
+      var gis = BLOCK_GIS[b.id] || {};
+      var popup = "<strong>" + b.name + "</strong> (" + b.district + ")<br>" +
+        "Status: <b>" + b.status + "</b><br>" +
+        "GPs: " + (gis.gp||0) + " | Green: " + (gis.greenKm||0) + "km | Brown: " + (gis.brownKm||0) + "km<br>" +
+        "Submissions: " + blockSubs.length;
+      marker.bindPopup(popup);
+      window._surveyMarkers.push(marker);
+    }
+  });
+
+  // Add damage section markers from OFC submissions
+  allSubs.forEach(function(s) {
+    if (!s.ofc || !s.ofc.length) return;
+    s.ofc.forEach(function(row) {
+      if (!row.latFrom || !row.latTo) return;
+      var lat1 = parseFloat(row.latFrom), lng1 = parseFloat(row.lonFrom||0);
+      var lat2 = parseFloat(row.latTo), lng2 = parseFloat(row.lonTo||0);
+      if (isNaN(lat1)||isNaN(lat2)||!lat1||!lat2) return;
+      var line = L.polyline([[lat1,lng1],[lat2,lng2]], {
+        color: row.dmgFrom?"#d32f2f":"#1565c0",
+        weight: 3, opacity: 0.8
+      }).addTo(window._gisMap);
+      if (row.spanFrom) line.bindPopup("Span: " + row.spanFrom + " → " + row.spanTo);
+      window._surveyMarkers.push(line);
+    });
+  });
 }
 
-function onPayBlockChange() {
-  var bid = document.getElementById("fpay-block") ? document.getElementById("fpay-block").value : "";
-  var type = document.getElementById("fpay-type") ? document.getElementById("fpay-type").value : "";
-  if (!bid || !type) return;
-  var vs = FIN.vendors.filter(function(v) { return v.blockId === bid && v.surveyType === type && v.status === "approved"; });
-  if (vs.length > 0 && document.getElementById("fpay-vendor")) document.getElementById("fpay-vendor").value = vs[0].vendorName;
+// Override initGISMap to add survey data
+var _origInitGIS = window.initGISMap;
+function initGISMap() {
+  if (_origInitGIS) _origInitGIS();
+  // After map loads, add survey overlay
+  setTimeout(function() {
+    try { enhanceGISMap(); } catch(e) { console.log("GIS enhance err:", e); }
+  }, 1500);
 }
 
-// ── SAVE FUNCTIONS ──
-function saveFund2() {
-  var obj = {
-    date: document.getElementById("ff-date") ? document.getElementById("ff-date").value : todayStr(),
-    amount: parseFloat(document.getElementById("ff-amt") ? document.getElementById("ff-amt").value : 0) || 0,
-    source: document.getElementById("ff-src") ? document.getElementById("ff-src").value : "",
-    ref: document.getElementById("ff-ref") ? document.getElementById("ff-ref").value : "",
-    remarks: document.getElementById("ff-rem") ? document.getElementById("ff-rem").value : "",
-    enteredBy: cu.name, createdAt: new Date().toISOString()
-  };
-  if (!obj.amount) { alert("Amount required!"); return; }
-  FIN.funds.push(obj); finSave("funds", obj);
-  closeFinModal(); showToast("Fund entry saved!"); refreshFinTab();
+// Add refresh GIS button handler
+function refreshGISOverlay() {
+  try { enhanceGISMap(); showToast("GIS overlay refreshed!"); }
+  catch(e) { showToast("GIS error: " + e.message); }
 }
 
-function saveVendor2() {
-  var fid = document.getElementById("fv-fid") ? document.getElementById("fv-fid").value : "";
-  var obj = {
-    blockId: document.getElementById("fv-block") ? document.getElementById("fv-block").value : "",
-    surveyType: document.getElementById("fv-type") ? document.getElementById("fv-type").value : "",
-    vendorName: document.getElementById("fv-name") ? document.getElementById("fv-name").value.trim() : "",
-    contact: document.getElementById("fv-contact") ? document.getElementById("fv-contact").value : "",
-    rate: parseFloat(document.getElementById("fv-rate") ? document.getElementById("fv-rate").value : 0) || 0,
-    unit: document.getElementById("fv-unit") ? document.getElementById("fv-unit").value : "km",
-    gst: document.getElementById("fv-gst") ? document.getElementById("fv-gst").value === "yes" : false,
-    gstPct: document.getElementById("fv-gstpct") ? document.getElementById("fv-gstpct").value : "18",
-    remarks: document.getElementById("fv-rem") ? document.getElementById("fv-rem").value : "",
-    status: cu.role === "head" ? "approved" : "pending",
-    submittedBy: cu.name, createdAt: new Date().toISOString()
-  };
-  if (!obj.blockId || !obj.vendorName) { alert("Block and vendor name required!"); return; }
-  if (fid) {
-    // Edit existing
-    var existing = FIN.vendors.find(function(v) { return v._fid === fid; });
-    if (existing) { Object.assign(existing, obj); finSave("vendors", existing); }
+
+
+
+// ============================================================
+// BILLING INTELLIGENCE — RVNL Invoice Tracker
+// ============================================================
+var _invoices = [];
+
+function loadInvoices() {
+  if (!FB_ENABLED || !window._db) return;
+  window._dbl.onSnapshot(
+    window._dbl.query(window._dbl.collection(window._db, "fin_payments"),
+      window._dbl.orderBy ? window._dbl.orderBy("date","desc") : undefined
+    ),
+    function(snap) {
+      _invoices = [];
+      snap.forEach(function(d) {
+        var data = d.data();
+        if (data.type==="rvnl-invoice" && !data.deleted) {
+          _invoices.push(Object.assign({_fid:d.id}, data));
+        }
+      });
+      if (_curFinTab === "fin-billing") refreshFinTab();
+    },
+    function(e) {
+      // Fallback - use FIN.payments
+      _invoices = FIN.payments.filter(function(p){return p.type==="rvnl-invoice"&&!p.deleted;});
+    }
+  );
+}
+
+function rBilling() {
+  var loa1val = 4966568, loa2val = 28297462;
+  var totalContract = loa1val + loa2val;
+
+  var invoices = _invoices.length ? _invoices :
+    FIN.payments.filter(function(p){return p.type==="rvnl-invoice"&&!p.deleted;});
+
+  var totalBilled = invoices.reduce(function(a,inv){return a+parseFloat(inv.amount||0);},0);
+  var totalReceived = FIN.funds.filter(function(f){return !f.deleted;})
+    .reduce(function(a,f){return a+parseFloat(f.amount||0);},0);
+  var totalPaidVendors = FIN.payments.filter(function(p){return p.status==="paid"&&p.type!=="rvnl-invoice"&&!p.deleted;})
+    .reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
+  var totalExp = FIN.expenses.filter(function(e){return !e.deleted;})
+    .reduce(function(a,e){return a+parseFloat(e.amount||0);},0);
+
+  var h = "<div class='card'>";
+  h += "<div class='ct'>&#128179; RVNL Billing Intelligence</div>";
+  h += "<div class='bi'>Contract value vs billed vs received. Automatically calculates what you can bill RVNL next.</div>";
+
+  // LOA summary
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr;margin-bottom:14px'>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>₹" + fmtR(loa1val) + "</div><div class='sl'>LOA-C — Fatehpur (5 blocks)</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>₹" + fmtR(loa2val) + "</div><div class='sl'>LOA-G — 41 blocks</div></div>";
+  h += "</div>";
+
+  // Key metrics
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr;margin-bottom:16px'>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>₹" + fmtR(totalReceived) + "</div><div class='sl'>Received from RVNL</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>₹" + fmtR(totalBilled) + "</div><div class='sl'>Billed to RVNL</div></div>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>₹" + fmtR(Math.max(0,totalBilled-totalReceived)) + "</div><div class='sl'>Outstanding</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>₹" + fmtR(Math.max(0,totalContract-totalBilled)) + "</div><div class='sl'>Balance to Bill</div></div>";
+  h += "</div>";
+
+  // P&L quick view
+  h += "<table class='tbl' style='margin-bottom:14px'><thead><tr><th>Item</th><th>Amount</th></tr></thead><tbody>";
+  var rows = [
+    {label:"Total Contract Value", amt:totalContract, clr:"var(--blue)"},
+    {label:"Total Billed to RVNL", amt:totalBilled, clr:"var(--blue)"},
+    {label:"Total Received from RVNL", amt:totalReceived, clr:"var(--ok)"},
+    {label:"Outstanding (Billed - Received)", amt:Math.max(0,totalBilled-totalReceived), clr:"var(--gold)"},
+    {label:"Vendor Payments Made", amt:totalPaidVendors, clr:"var(--red)"},
+    {label:"Expenses Incurred", amt:totalExp, clr:"var(--red)"},
+    {label:"Net Margin (Received - Cost)", amt:totalReceived-totalPaidVendors-totalExp, clr:totalReceived-totalPaidVendors-totalExp>0?"var(--ok)":"var(--red)"},
+  ];
+  rows.forEach(function(r){
+    h += "<tr><td>" + r.label + "</td><td style='font-weight:700;color:" + r.clr + "'>₹" + fmtN(r.amt) + "</td></tr>";
+  });
+  h += "</tbody></table>";
+
+  // Invoice list + add button
+  h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>";
+  h += "<div class='ct' style='font-size:14px'>RVNL Invoices Raised</div>";
+  h += "<button class='btn btn-gold' data-modal='rvnl-invoice'>+ Add Invoice Record</button>";
+  h += "</div>";
+
+  if (!invoices.length) {
+    h += "<div class='bi'>Koi invoice record nahi. Past invoices add karo (backdate kar sakte ho).</div>";
   } else {
-    FIN.vendors.push(obj); finSave("vendors", obj);
+    h += "<div style='overflow-x:auto'><table class='tbl'><thead><tr><th>Invoice No.</th><th>Date</th><th>LOA</th><th>Amount</th><th>Description</th><th>Status</th></tr></thead><tbody>";
+    invoices.forEach(function(inv) {
+      h += "<tr><td style='font-weight:700'>" + (inv.invoiceNo||"-") + "</td>";
+      h += "<td>" + (inv.date||"-") + "</td>";
+      h += "<td style='font-size:11px'>" + (inv.loa||"-") + "</td>";
+      h += "<td style='font-weight:700;color:var(--blue)'>₹" + fmtN(inv.amount) + "</td>";
+      h += "<td style='font-size:11px'>" + (inv.description||"-") + "</td>";
+      h += "<td><span class='tag " + (inv.received?"tg":"to") + "'>" + (inv.received?"Received":"Pending") + "</span></td></tr>";
+    });
+    h += "</tbody></table></div>";
   }
-  closeFinModal(); showToast("Vendor saved!"); refreshFinTab();
+  h += "</div>";
+  return h;
 }
 
-function saveProgress2() {
-  var type = document.getElementById("fp2-type") ? document.getElementById("fp2-type").value : "";
+function buildInvoiceForm() {
+  return "<div class='bw' style='font-size:11px'>RVNL ko raise ki gayi invoice record karo. August 2025 se backdate kar sakte ho.</div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Invoice No. *</label><input class='finp' id='fi-no' placeholder='e.g. 02/Mar/26/0146'></div><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fi-date' value='" + today() + "' min='2025-08-01'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>Amount (ex-GST) Rs *</label><input class='finp' type='number' id='fi-amount' placeholder='0'></div><div class='fgrp'><label class='flbl'>GST Amount Rs</label><input class='finp' type='number' id='fi-gst' placeholder='0'></div></div>" +
+  "<div class='frow f1'><div class='fgrp'><label class='flbl'>Description</label><input class='finp' id='fi-desc' placeholder='e.g. Gonda 8 blocks — LOA-G'></div></div>" +
+  "<div class='frow'><div class='fgrp'><label class='flbl'>LOA Reference</label><select class='fsel' id='fi-loa'><option value='LOA-C'>LOA-C — Fatehpur (RVNL/S&T/QUOT/BN/East/25-26/C)</option><option value='LOA-G'>LOA-G — 41 Blocks (RVNL/S&T/QUOT/BN/East/25-26/G)</option></select></div><div class='fgrp'><label class='flbl'>Status</label><select class='fsel' id='fi-recv'><option value='no'>Pending</option><option value='yes'>Received</option></select></div></div>" +
+  "<div class='btns'><button class='btn btn-gold' onclick='saveInvoice()'>Save Invoice</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+}
+
+function saveInvoice() {
+  var invoiceNo = getV("fi-no");
+  var amount = parseFloat(getV("fi-amount"))||0;
+  if (!invoiceNo || !amount) { alert("Invoice No. and amount required!"); return; }
   var obj = {
-    date: document.getElementById("fp2-date") ? document.getElementById("fp2-date").value : todayStr(),
-    blockId: document.getElementById("fp2-block") ? document.getElementById("fp2-block").value : "",
-    type: type,
-    vendorName: document.getElementById("fp2-vendor") ? document.getElementById("fp2-vendor").value : "",
-    kmDone: parseFloat(document.getElementById("fp2-km") ? document.getElementById("fp2-km").value : 0) || 0,
-    cumKm: parseFloat(document.getElementById("fp2-cumkm") ? document.getElementById("fp2-cumkm").value : 0) || 0,
-    gpsDone: parseInt(document.getElementById("fp2-gps") ? document.getElementById("fp2-gps").value : 0) || 0,
-    cumGps: parseInt(document.getElementById("fp2-cumgps") ? document.getElementById("fp2-cumgps").value : 0) || 0,
-    remarks: document.getElementById("fp2-rem") ? document.getElementById("fp2-rem").value : "",
-    enteredBy: cu.name, createdAt: new Date().toISOString()
+    type: "rvnl-invoice",
+    invoiceNo: invoiceNo,
+    date: getV("fi-date"),
+    amount: amount,
+    gstAmount: parseFloat(getV("fi-gst"))||0,
+    description: getV("fi-desc"),
+    loa: getV("fi-loa"),
+    received: getV("fi-recv")==="yes",
+    enteredBy: cu.name,
+    ts: new Date().toLocaleString("en-IN")
   };
-  if (!obj.blockId) { alert("Block required!"); return; }
-  FIN.workProgress.push(obj); finSave("workProgress", obj);
-  closeFinModal(); showToast("Work progress saved!"); refreshFinTab();
+  FIN.payments.push(obj);
+  finSave("payments", obj);
+  closeFinModal();
+  showToast("Invoice record saved!");
+  refreshFinTab();
 }
 
-function savePayment2() {
-  var obj = {
-    date: document.getElementById("fpay-date") ? document.getElementById("fpay-date").value : todayStr(),
-    blockId: document.getElementById("fpay-block") ? document.getElementById("fpay-block").value : "",
-    surveyType: document.getElementById("fpay-type") ? document.getElementById("fpay-type").value : "",
-    vendorName: document.getElementById("fpay-vendor") ? document.getElementById("fpay-vendor").value.trim() : "",
-    stage: document.getElementById("fpay-stage") ? document.getElementById("fpay-stage").value : "",
-    workDone: document.getElementById("fpay-work") ? document.getElementById("fpay-work").value.trim() : "",
-    amount: parseFloat(document.getElementById("fpay-amt") ? document.getElementById("fpay-amt").value : 0) || 0,
-    billLink: document.getElementById("fpay-bill") ? document.getElementById("fpay-bill").value : "",
-    gst: document.getElementById("fpay-gst") ? document.getElementById("fpay-gst").value : "no",
-    status: "pending", requestedBy: cu.name, createdAt: new Date().toISOString()
-  };
-  if (!obj.blockId || !obj.amount || !obj.workDone) { alert("Block, work details and amount required!"); return; }
-  FIN.payments.push(obj); finSave("payments", obj);
-  closeFinModal(); showToast("Payment request submitted!"); refreshFinTab();
-}
-
-function saveExpense2() {
-  var gstVal = document.getElementById("fe2-gst") ? document.getElementById("fe2-gst").value : "no";
-  var obj = {
-    date: document.getElementById("fe2-date") ? document.getElementById("fe2-date").value : todayStr(),
-    category: document.getElementById("fe2-cat") ? document.getElementById("fe2-cat").value : "",
-    description: document.getElementById("fe2-desc") ? document.getElementById("fe2-desc").value.trim() : "",
-    blockId: document.getElementById("fe2-block") ? document.getElementById("fe2-block").value : "",
-    amount: parseFloat(document.getElementById("fe2-amt") ? document.getElementById("fe2-amt").value : 0) || 0,
-    frequency: document.getElementById("fe2-freq") ? document.getElementById("fe2-freq").value : "one-time",
-    billLink: document.getElementById("fe2-bill") ? document.getElementById("fe2-bill").value : "",
-    hasGst: gstVal !== "no",
-    gstPct: gstVal === "yes12" ? "12" : "18",
-    enteredBy: cu.name, createdAt: new Date().toISOString()
-  };
-  if (!obj.description || !obj.amount) { alert("Description and amount required!"); return; }
-  FIN.expenses.push(obj); finSave("expenses", obj);
-  closeFinModal(); showToast("Expense saved!"); refreshFinTab();
-}
-
-function saveTA2() {
-  var s = parseFloat(document.getElementById("ft2-start") ? document.getElementById("ft2-start").value : 0) || 0;
-  var e2 = parseFloat(document.getElementById("ft2-end") ? document.getElementById("ft2-end").value : 0) || 0;
-  var km = e2 > s ? e2 - s : 0;
-  var days = parseFloat(document.getElementById("ft2-days") ? document.getElementById("ft2-days").value : 0) || 0;
-  var daRate = parseFloat(document.getElementById("ft2-darate") ? document.getElementById("ft2-darate").value : 0) || 0;
-  var obj = {
-    date: document.getElementById("ft2-date") ? document.getElementById("ft2-date").value : todayStr(),
-    supervisorName: document.getElementById("ft2-sup") ? document.getElementById("ft2-sup").value : "",
-    blockId: document.getElementById("ft2-block") ? document.getElementById("ft2-block").value : "",
-    startKm: s, endKm: e2, km: km, taAmount: km * 2.5,
-    daDays: days, daRate: daRate, daAmount: days * daRate,
-    remarks: document.getElementById("ft2-rem") ? document.getElementById("ft2-rem").value : "",
-    status: "pending", enteredBy: cu.name, createdAt: new Date().toISOString()
-  };
-  if (!obj.supervisorName || (km <= 0 && days <= 0)) { alert("Supervisor and KM or DA days required!"); return; }
-  FIN.taEntries.push(obj); finSave("taEntries", obj);
-  closeFinModal(); showToast("TA/DA submitted for approval!"); refreshFinTab();
-}
-
-// Load finance on Firebase ready
-(function() {
-  var orig = window._fbReady;
-  window._fbReady = function() {
-    if (orig) orig();
-    setTimeout(finLoad, 800);
-  };
-})();
 
 // PWA Manifest - inject dynamically so it works from file:// and https://
 var manifest = {
