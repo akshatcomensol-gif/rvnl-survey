@@ -282,6 +282,7 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
         <div style="font-size:12px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="t-name"></div>
       </div>
       <div style="font-size:11px;color:rgba(255,255,255,.55);background:rgba(255,255,255,.08);padding:3px 8px;border-radius:10px;font-family:monospace;flex-shrink:0" id="session-timer">00:00</div>
+      <button style="background:rgba(184,134,11,.15);border:1px solid rgba(184,134,11,.4);color:var(--gold);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0" onclick="openChangePwd()">&#128273;</button>
       <button style="background:rgba(220,53,69,.15);border:1px solid rgba(220,53,69,.4);color:#FF8080;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0" onclick="doLogout()">&#10006;</button>
     </div>
     <!-- Row 2: Nav tabs (scrollable) -->
@@ -302,6 +303,35 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
     </div>
   </div>
   <div class="content" id="page"></div>
+</div>
+
+<!-- Change Password Modal -->
+<div class="overlay" id="pwd-modal">
+  <div class="modal" style="max-width:400px">
+    <div class="mh">
+      <div class="mt">&#128273; Change My Password</div>
+      <button class="mc" onclick="document.getElementById('pwd-modal').classList.remove('open')">&times;</button>
+    </div>
+    <div id="pwd-modal-body">
+      <div class="bi" style="margin-bottom:12px">Apna naya password set karo. Yeh Firebase mein save hoga.</div>
+      <div class="fgrp" style="margin-bottom:12px">
+        <label class="flbl">Current Password</label>
+        <input class="finp" type="password" id="pwd-current" placeholder="Purana password">
+      </div>
+      <div class="fgrp" style="margin-bottom:12px">
+        <label class="flbl">New Password</label>
+        <input class="finp" type="password" id="pwd-new" placeholder="Naya password (min 6 chars)">
+      </div>
+      <div class="fgrp" style="margin-bottom:16px">
+        <label class="flbl">Confirm New Password</label>
+        <input class="finp" type="password" id="pwd-confirm" placeholder="Naya password dobara">
+      </div>
+      <div class="btns">
+        <button class="btn btn-gold" onclick="saveChangePwd()">Save Password</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('pwd-modal').classList.remove('open')">Cancel</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Finance Modal -->
@@ -5616,6 +5646,102 @@ function saveInvoice() {
   closeFinModal();
   showToast("Invoice record saved!");
   refreshFinTab();
+}
+
+
+
+// ============================================================
+// SELF PASSWORD CHANGE
+// ============================================================
+function openChangePwd() {
+  var m = document.getElementById("pwd-modal");
+  if (m) {
+    // Clear fields
+    ["pwd-current","pwd-new","pwd-confirm"].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    m.classList.add("open");
+  }
+}
+
+async function saveChangePwd() {
+  var current = document.getElementById("pwd-current") ? document.getElementById("pwd-current").value : "";
+  var newPwd = document.getElementById("pwd-new") ? document.getElementById("pwd-new").value : "";
+  var confirm = document.getElementById("pwd-confirm") ? document.getElementById("pwd-confirm").value : "";
+
+  if (!current) { alert("Current password required!"); return; }
+  if (!newPwd || newPwd.length < 6) { alert("New password must be at least 6 characters!"); return; }
+  if (newPwd !== confirm) { alert("Passwords do not match!"); return; }
+
+  // Verify current password
+  var userInList = USERS.find(function(u) {
+    return u.name === cu.name && u.role === cu.role && u.pwd === current;
+  });
+
+  if (!userInList) {
+    // Try hashed check
+    var currentHash = await hashPassword(current);
+    var matched = false;
+    if (FB_ENABLED && window._db) {
+      try {
+        var snap = await window._dbl.getDocs(window._dbl.collection(window._db, "users"));
+        snap.forEach(function(d) {
+          var data = d.data();
+          if (data.name === cu.name && data.role === cu.role && data.pwdHash === currentHash) {
+            matched = true;
+          }
+        });
+      } catch(e) { console.log("pwd check err:", e); }
+    }
+    if (!matched) { alert("Current password is incorrect!"); return; }
+  }
+
+  // Hash new password
+  var newHash = await hashPassword(newPwd);
+
+  // Save to Firebase users collection
+  if (FB_ENABLED && window._db) {
+    try {
+      // Check if user doc exists
+      var snap2 = await window._dbl.getDocs(window._dbl.collection(window._db, "users"));
+      var userDocId = null;
+      snap2.forEach(function(d) {
+        if (d.data().name === cu.name && d.data().role === cu.role) userDocId = d.id;
+      });
+
+      if (userDocId) {
+        // Update existing
+        await window._dbl.setDoc(
+          window._dbl.doc(window._db, "users", userDocId),
+          { pwdHash: newHash, name: cu.name, role: cu.role, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      } else {
+        // Create new
+        await window._dbl.addDoc(window._dbl.collection(window._db, "users"), {
+          name: cu.name, role: cu.role, pwdHash: newHash,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      // Also update local USERS array
+      var localUser = USERS.find(function(u){ return u.name===cu.name && u.role===cu.role; });
+      if (localUser) localUser.pwd = newPwd;
+
+      document.getElementById("pwd-modal").classList.remove("open");
+      showToast("✅ Password changed successfully!");
+
+    } catch(e) {
+      alert("Save failed: " + e.message);
+    }
+  } else {
+    // Offline — update local only
+    var localUser2 = USERS.find(function(u){ return u.name===cu.name && u.role===cu.role; });
+    if (localUser2) localUser2.pwd = newPwd;
+    document.getElementById("pwd-modal").classList.remove("open");
+    showToast("Password changed (local only — sync when online)");
+  }
 }
 
 
