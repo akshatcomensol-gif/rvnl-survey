@@ -2750,50 +2750,33 @@ function renderUsers() {
   return h;
 }
 
-function saveNewUser() {
-  var role = getV("au-role");
-  var name = getV("au-name").trim();
-  var pwd  = getV("au-pwd").trim() || ROLE_PWDS[role];
-  if (!name) { alert("Name is required."); return; }
-  for (var i = 0; i < USERS.length; i++) {
-    if (USERS[i].name === name && USERS[i].role === role) { alert("Yeh naam already is role mein hai."); return; }
-  }
-  var newUser = {role:role, name:name, pwd:pwd};
-  USERS.push(newUser);
-  if (FB_ENABLED && window._db) {
-    window._dbl.addDoc(window._dbl.collection(window._db, "users"), newUser)
-      .then(function(r) { newUser._fid = r.id; showToast("✅ " + name + " added & saved to cloud!"); })
-      .catch(function(e) { showToast("Added locally. Cloud: " + e.message); });
-  } else { showToast(name + " added (local only)"); }
-  cm("modal-adduser"); gp("users");
+function saveNewUser(){
+  var role=getV("au-role");var name=getV("au-name").trim();var pwd=getV("au-pwd").trim()||ROLE_PWDS[role];
+  if(!name){alert("Name is required.");return;}
+  for(var i=0;i<USERS.length;i++){if(USERS[i].name===name&&USERS[i].role===role){alert("Yeh naam already is role mein hai.");return;}}
+  var nu={role:role,name:name,pwd:pwd};USERS.push(nu);
+  if(FB_ENABLED&&window._db){window._dbl.addDoc(window._dbl.collection(window._db,"users"),nu).then(function(r){nu._fid=r.id;showToast("✅ "+name+" saved!");}).catch(function(e){showToast(name+" added. Err:"+e.message);});}
+  else{showToast(name+" added (local only)");}
+  cm("modal-adduser");gp("users");
 }
 
-function removeUser(name, role) {
-  if (!confirm("Remove " + name + " from team?")) return;
-  var fid = null;
-  for (var i = 0; i < USERS.length; i++) {
-    if (USERS[i].name === name && USERS[i].role === role) { fid = USERS[i]._fid || null; break; }
-  }
-  USERS = USERS.filter(function(u){ return !(u.name===name && u.role===role); });
-  if (fid && FB_ENABLED && window._db) {
-    window._dbl.setDoc(window._dbl.doc(window._db, "users", fid), {deleted:true}, {merge:true})
-      .then(function(){ showToast(name + " removed from cloud!"); })
-      .catch(function(e){ showToast("Removed. Cloud: " + e.message); });
-  } else { showToast(name + " removed."); }
+function removeUser(name,role){
+  if(!confirm("Remove "+name+" from team?"))return;
+  var fid=null;
+  for(var i=0;i<USERS.length;i++){if(USERS[i].name===name&&USERS[i].role===role){fid=USERS[i]._fid||null;break;}}
+  USERS=USERS.filter(function(u){return !(u.name===name&&u.role===role);});
+  if(fid&&FB_ENABLED&&window._db){window._dbl.setDoc(window._dbl.doc(window._db,"users",fid),{deleted:true},{merge:true}).then(function(){showToast(name+" removed!");});}
+  else{showToast(name+" removed.");}
   gp("users");
 }
 
-function changePwd(role) {
-  var np = prompt("New password for " + role + " role (min 4 chars):", ROLE_PWDS[role]);
-  if (!np || np.trim().length < 4) { if (np !== null) alert("Min 4 characters required."); return; }
-  np = np.trim();
-  ROLE_PWDS[role] = np;
-  for (var i = 0; i < USERS.length; i++) { if (USERS[i].role === role) USERS[i].pwd = np; }
-  if (FB_ENABLED && window._db) {
-    window._dbl.setDoc(window._dbl.doc(window._db, "settings", "rolePwds"), ROLE_PWDS, {merge:true})
-      .then(function(){ showToast("✅ Password saved to cloud for " + role); })
-      .catch(function(e){ showToast("Updated locally. Cloud: " + e.message); });
-  } else { showToast("Password updated for " + role); }
+function changePwd(role){
+  var np=prompt("New password for "+role+" role:",ROLE_PWDS[role]);
+  if(!np||np.trim().length<4){if(np!==null)alert("Min 4 chars.");return;}
+  np=np.trim();ROLE_PWDS[role]=np;
+  for(var i=0;i<USERS.length;i++){if(USERS[i].role===role)USERS[i].pwd=np;}
+  if(FB_ENABLED&&window._db){window._dbl.setDoc(window._dbl.doc(window._db,"settings","rolePwds"),ROLE_PWDS,{merge:true}).then(function(){showToast("✅ Password saved for "+role);});}
+  else{showToast("Password updated for "+role);}
   gp("users");
 }
 
@@ -5899,36 +5882,198 @@ function openChangePwd() {
   }
 }
 
-async function saveChangePwd() {
-  var current = (document.getElementById("pwd-current")||{}).value || "";
-  var newPwd  = (document.getElementById("pwd-new")||{}).value || "";
-  var confirm2= (document.getElementById("pwd-confirm")||{}).value || "";
-  if (!current) { alert("Current password required!"); return; }
-  if (!newPwd || newPwd.length < 4) { alert("New password min 4 characters!"); return; }
-  if (newPwd !== confirm2) { alert("Passwords do not match!"); return; }
-  var userInList = USERS.find(function(u){ return u.name===cu.name && u.role===cu.role && u.pwd===current; });
-  if (!userInList && ROLE_PWDS[cu.role] !== current) { alert("Current password is incorrect!"); return; }
-  USERS.forEach(function(u){ if (u.name===cu.name && u.role===cu.role) u.pwd = newPwd; });
-  if (ROLE_PWDS[cu.role] === current) ROLE_PWDS[cu.role] = newPwd;
-  if (FB_ENABLED && window._db) {
-    try {
-      var snap = await window._dbl.getDocs(window._dbl.collection(window._db, "users"));
-      var uid = null;
-      snap.forEach(function(d){ if (d.data().name===cu.name && d.data().role===cu.role) uid=d.id; });
-      if (uid) {
-        await window._dbl.setDoc(window._dbl.doc(window._db,"users",uid), {pwd:newPwd,name:cu.name,role:cu.role},{merge:true});
-      } else {
-        await window._dbl.addDoc(window._dbl.collection(window._db,"users"), {name:cu.name,role:cu.role,pwd:newPwd});
-      }
-      document.getElementById("pwd-modal").classList.remove("open");
-      showToast("✅ Password saved to cloud!");
-    } catch(e) {
-      document.getElementById("pwd-modal").classList.remove("open");
-      showToast("Changed locally. Cloud: " + e.message);
-    }
-  } else {
-    document.getElementById("pwd-modal").classList.remove("open");
-    showToast("Password changed (local only)");
-  }
+async function saveChangePwd(){
+  var cur=(document.getElementById("pwd-current")||{}).value||"";
+  var np=(document.getElementById("pwd-new")||{}).value||"";
+  var c2=(document.getElementById("pwd-confirm")||{}).value||"";
+  if(!cur){alert("Current password required!");return;}
+  if(!np||np.length<4){alert("New password min 4 chars!");return;}
+  if(np!==c2){alert("Passwords do not match!");return;}
+  var ok=USERS.find(function(u){return u.name===cu.name&&u.role===cu.role&&u.pwd===cur;});
+  if(!ok&&ROLE_PWDS[cu.role]!==cur){alert("Current password incorrect!");return;}
+  USERS.forEach(function(u){if(u.name===cu.name&&u.role===cu.role)u.pwd=np;});
+  if(ROLE_PWDS[cu.role]===cur)ROLE_PWDS[cu.role]=np;
+  if(FB_ENABLED&&window._db){
+    try{
+      var snap=await window._dbl.getDocs(window._dbl.collection(window._db,"users"));
+      var uid=null;snap.forEach(function(d){if(d.data().name===cu.name&&d.data().role===cu.role)uid=d.id;});
+      if(uid)await window._dbl.setDoc(window._dbl.doc(window._db,"users",uid),{pwd:np,name:cu.name,role:cu.role},{merge:true});
+      else await window._dbl.addDoc(window._dbl.collection(window._db,"users"),{name:cu.name,role:cu.role,pwd:np});
+      document.getElementById("pwd-modal").classList.remove("open");showToast("✅ Password saved to cloud!");
+    }catch(e){document.getElementById("pwd-modal").classList.remove("open");showToast("Changed locally. "+e.message);}
+  }else{document.getElementById("pwd-modal").classList.remove("open");showToast("Password changed (local only)");}
 }
 
+function loadAttendanceAll() {
+  showToast("Loading attendance...");
+  loadSessionLogs();
+  // Also reload fin_attendance via finLoad
+  if (FB_ENABLED && window._db) {
+    window._dbl.getDocs(window._dbl.collection(window._db, "fin_attendance"))
+    .then(function(snap) {
+      FIN.attendance = FIN.attendance || [];
+      snap.forEach(function(d) {
+        var data = d.data();
+        var exists = FIN.attendance.find(function(x){ return x._fid === d.id; });
+        if (!exists) FIN.attendance.push(Object.assign({_fid: d.id}, data));
+      });
+      setTimeout(function() {
+        if (_curFinTab === "fin-att") refreshFinTab();
+      }, 500);
+    }).catch(function(e){ console.log("fin_att load:", e); });
+  }
+  setTimeout(function() {
+    if (_curFinTab === "fin-att") refreshFinTab();
+  }, 2000);
+}
+
+function loadSessionLogs() {
+  if (!FB_ENABLED || !window._db) return;
+  // Load from sessionLogs (old punch data)
+  window._dbl.getDocs(window._dbl.collection(window._db, "sessionLogs"))
+  .then(function(snap) {
+    _sessionLogAtt = [];
+    snap.forEach(function(d) {
+      var data = d.data();
+      // sessionLogs fields: user, role, loginTime, logoutTime, durationStr, durationSec
+      var loginT = data.loginTime || data.punchIn || "";
+      var logoutT = data.logoutTime || data.punchOut || "";
+      var dur = data.durationStr || data.duration || data.sessionDuration || "";
+      // Extract date from loginTime "25/03/2026, 10:24:59 am"
+      var dateStr = "";
+      if (data.loginTime && data.loginTime.includes(",")) {
+        var parts = data.loginTime.split(",")[0].trim(); // "25/03/2026"
+        var dp = parts.split("/");
+        if (dp.length === 3) dateStr = dp[2] + "-" + dp[1] + "-" + dp[0]; // "2026-03-25"
+      }
+      if (!dateStr) dateStr = new Date().toISOString().split("T")[0];
+      _sessionLogAtt.push({
+        _fid: "sl_" + d.id,
+        name: data.user || data.name || data.userName || "Unknown",
+        role: data.role || data.userRole || "",
+        date: dateStr,
+        dateDisplay: data.loginTime ? data.loginTime.split(",")[0] : dateStr,
+        punchIn: loginT,
+        punchOut: logoutT,
+        duration: dur,
+        type: dur ? "punchout" : "punchin",
+        source: "sessionLogs"
+      });
+    });
+    if (_curFinTab === "fin-att") refreshFinTab();
+    var log = document.getElementById("att-log");
+    if (log) log.innerHTML = buildAttLog();
+  }).catch(function(e){ console.log("sessionLogs load:", e); });
+
+  // Also load any existing attendance collection
+  window._dbl.getDocs(window._dbl.collection(window._db, "attendance"))
+  .then(function(snap) {
+    snap.forEach(function(d) {
+      var data = d.data();
+      var exists = _sessionLogAtt.find(function(x){ return x._fid === "att_"+d.id; });
+      if (!exists) {
+        _sessionLogAtt.push({
+          _fid: "att_" + d.id,
+          name: data.user || data.name || "Unknown",
+          role: data.role || "",
+          date: data.date || "",
+          dateDisplay: data.date || "",
+          punchIn: data.punchIn || data.loginTime || "",
+          punchOut: data.punchOut || data.logoutTime || "",
+          duration: data.duration || "",
+          type: "punchout",
+          source: "attendance"
+        });
+      }
+    });
+    if (_curFinTab === "fin-att") refreshFinTab();
+    var log = document.getElementById("att-log");
+    if (log) log.innerHTML = buildAttLog();
+  }).catch(function(e){ console.log("attendance load:", e); });
+}
+
+
+
+// PWA Manifest - inject dynamically so it works from file:// and https://
+var manifest = {
+  name: "Comensol RVNL Survey",
+  short_name: "RVNL Survey",
+  description: "Comensol Enterprises - RVNL Fiber Route Survey Management",
+  start_url: "./",
+  display: "standalone",
+  background_color: "#0D1B2E",
+  theme_color: "#C8972B",
+  orientation: "portrait-primary",
+  icons: [
+    {src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%230D1B2E'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='%23C8972B'%3EC%3C/text%3E%3C/svg%3E", sizes: "192x192", type: "image/svg+xml"},
+    {src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%230D1B2E'/%3E%3Ctext x='256' y='350' text-anchor='middle' font-size='280' fill='%23C8972B'%3EC%3C/text%3E%3C/svg%3E", sizes: "512x512", type: "image/svg+xml"}
+  ]
+};
+var blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
+var url  = URL.createObjectURL(blob);
+document.getElementById('pwa-manifest').href = url;
+
+// PWA Install - Android Chrome
+var _deferredInstall = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  _deferredInstall = e;
+  var b = document.createElement('div');
+  b.id = 'pwa-banner';
+  b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1A6B3C;color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;z-index:9999;font-family:DM Sans,sans-serif;font-size:13px;box-shadow:0 -2px 12px rgba(0,0,0,.3)';
+  var installBtn = document.createElement('button');
+  installBtn.textContent = 'Install';
+  installBtn.style.cssText = 'background:#C8972B;border:none;color:#0D1B2E;padding:8px 16px;border-radius:6px;font-weight:700;cursor:pointer;font-size:13px;margin-left:8px';
+  installBtn.onclick = function() { _deferredInstall.prompt(); b.remove(); };
+  var closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = 'background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 12px;border-radius:6px;cursor:pointer;font-size:13px;margin-left:4px';
+  closeBtn.onclick = function() { b.remove(); };
+  var span = document.createElement('span');
+  span.innerHTML = '&#128241; <strong>App Install Karo</strong> - Home screen pe icon milega!';
+  var btnDiv = document.createElement('div');
+  btnDiv.style.display = 'flex';
+  btnDiv.appendChild(installBtn);
+  btnDiv.appendChild(closeBtn);
+  b.appendChild(span);
+  b.appendChild(btnDiv);
+  document.body.appendChild(b);
+  // Show install button in login page too
+  var lb = document.getElementById('pwa-install-btn');
+  if (lb) lb.style.display = 'block';
+});
+
+// iOS Safari install guide
+function showIOSGuide() {
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  var isInApp = window.navigator.standalone;
+  var shown = sessionStorage.getItem('ios_guide_shown');
+  if (!isIOS || isInApp || shown) return;
+  sessionStorage.setItem('ios_guide_shown', '1');
+  setTimeout(function() {
+    var g = document.createElement('div');
+    g.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#1C2B45;border-top:2px solid #B8860B;color:#fff;padding:16px;z-index:9999;font-family:DM Sans,sans-serif;font-size:13px;text-align:center';
+    var title = document.createElement('div');
+    title.style.cssText = 'font-weight:700;color:#DAA520;margin-bottom:8px;font-size:15px';
+    title.textContent = '📱 iPhone/iPad par App Install Karo';
+    var steps = document.createElement('div');
+    steps.style.cssText = 'color:rgba(255,255,255,.8);line-height:1.8';
+    steps.innerHTML = '1. Neeche <strong style="color:#DAA520">Share button</strong> (⬆) dabao<br>2. "<strong style="color:#DAA520">Add to Home Screen</strong>" select karo<br>3. <strong style="color:#DAA520">Add</strong> dabao';
+    var okBtn = document.createElement('button');
+    okBtn.textContent = 'Samajh Gaya ✓';
+    okBtn.style.cssText = 'margin-top:12px;background:#B8860B;border:none;color:#0D1B2E;padding:8px 20px;border-radius:6px;font-weight:700;cursor:pointer';
+    okBtn.onclick = function() { g.remove(); };
+    g.appendChild(title);
+    g.appendChild(steps);
+    g.appendChild(okBtn);
+    document.body.appendChild(g);
+  }, 2500);
+}
+window.addEventListener('load', showIOSGuide);
+
+function loadUsersFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'users')).then(function(snap){snap.forEach(function(d){var data=d.data();if(data.deleted)return;var ex=USERS.find(function(u){return u.name===data.name&&u.role===data.role;});if(!ex&&data.name&&data.role){USERS.push({role:data.role,name:data.name,pwd:data.pwd||ROLE_PWDS[data.role]||'',_fid:d.id});}else if(ex){ex._fid=d.id;if(data.pwd)ex.pwd=data.pwd;}});}).catch(function(e){console.log('loadUsers:',e);});}
+function loadRolePwdsFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'settings')).then(function(snap){snap.forEach(function(d){if(d.id==='rolePwds'){var data=d.data();Object.keys(data).forEach(function(r){if(data[r]){ROLE_PWDS[r]=data[r];USERS.forEach(function(u){if(u.role===r)u.pwd=data[r];});}});}});}).catch(function(e){console.log('loadRolePwds:',e);});}
+</script>
+
+</body>
+</html>
