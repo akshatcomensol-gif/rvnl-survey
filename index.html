@@ -3896,13 +3896,23 @@ function finSave(col, obj) {
   }
 }
 
+var _finListeners = []; // Store onSnapshot listeners for cleanup
+
 function finLoad() {
   if (!FB_ENABLED || !window._db) return;
+
+  // Unsubscribe old listeners first
+  _finListeners.forEach(function(unsub){ try{ unsub(); }catch(e){} });
+  _finListeners = [];
+
   var cols = ["funds","vendors","workLog","payments","expenses","taLog","attendance"];
-  var total = cols.length; var loaded = 0;
+  var loaded = 0; var total = cols.length;
+
   cols.forEach(function(col) {
-    window._dbl.getDocs(window._dbl.collection(window._db, "fin_"+col))
-      .then(function(snap) {
+    // onSnapshot = real-time live updates
+    var unsub = window._dbl.onSnapshot(
+      window._dbl.collection(window._db, "fin_"+col),
+      function(snap) {
         FIN[col] = [];
         snap.forEach(function(d){
           var data = d.data();
@@ -3910,15 +3920,33 @@ function finLoad() {
         });
         loaded++;
         if (loaded === total) {
-          refreshFinTab();
+          if (document.getElementById("fin-content")) refreshFinTab();
           updAttBadge();
-          showToast("Finance data loaded!");
+        } else if (loaded < total) {
+          // Still loading - refresh when done
+          if (document.getElementById("fin-content")) refreshFinTab();
         }
-      }).catch(function(e){ console.log("finLoad err "+col, e); });
+      },
+      function(e){
+        console.log("finLoad err "+col, e);
+        // Fallback: getDocs
+        window._dbl.getDocs(window._dbl.collection(window._db, "fin_"+col))
+          .then(function(snap2) {
+            FIN[col] = [];
+            snap2.forEach(function(d){
+              var data = d.data();
+              if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
+            });
+            if (document.getElementById("fin-content")) refreshFinTab();
+          });
+      }
+    );
+    _finListeners.push(unsub);
   });
 }
 
 function finReload() {
+  showToast("Refreshing...");
   finLoad();
 }
 
@@ -5055,7 +5083,7 @@ var _isOnline = navigator.onLine;
 
 // Register Service Worker
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(function(reg) {
+  navigator.serviceWorker.register('/sw.js?v=26MAR26').then(function(reg) {
     _swReg = reg;
     console.log("SW registered");
   }).catch(function(e) { console.log("SW reg failed:", e); });
@@ -6060,6 +6088,25 @@ window.addEventListener('load', showIOSGuide);
 
 function loadUsersFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'users')).then(function(snap){snap.forEach(function(d){var data=d.data();if(data.deleted)return;var ex=USERS.find(function(u){return u.name===data.name&&u.role===data.role;});if(!ex&&data.name&&data.role){USERS.push({role:data.role,name:data.name,pwd:data.pwd||ROLE_PWDS[data.role]||'',_fid:d.id});}else if(ex){ex._fid=d.id;if(data.pwd)ex.pwd=data.pwd;}});}).catch(function(e){console.log('loadUsers:',e);});}
 function loadRolePwdsFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'settings')).then(function(snap){snap.forEach(function(d){if(d.id==='rolePwds'){var data=d.data();Object.keys(data).forEach(function(r){if(data[r]){ROLE_PWDS[r]=data[r];USERS.forEach(function(u){if(u.role===r)u.pwd=data[r];});}});}});}).catch(function(e){console.log('loadRolePwds:',e);});}
+
+// Auto-refresh data when tab becomes visible again
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden && cu && FB_ENABLED && window._db) {
+    // Reload finance data
+    if (typeof finLoad === 'function') finLoad();
+    // Reload sessions/attendance
+    if (typeof loadSessionLogs === 'function') setTimeout(loadSessionLogs, 500);
+    console.log("[Auto-refresh] Tab visible - data refreshed");
+  }
+});
+
+// Periodic auto-refresh every 5 minutes when Finance tab is open
+setInterval(function() {
+  if (cu && FB_ENABLED && window._db && document.getElementById("fin-content")) {
+    finLoad();
+  }
+}, 5 * 60 * 1000);
+
 </script>
 
 </body>
