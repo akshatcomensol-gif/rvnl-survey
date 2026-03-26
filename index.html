@@ -3891,7 +3891,11 @@ function finSave(col, obj) {
       .catch(function(e){ console.error("finSave err:", e); });
   } else {
     window._dbl.addDoc(window._dbl.collection(window._db, "fin_"+col), obj)
-      .then(function(r){ obj._fid = r.id; })
+      .then(function(r){
+        obj._fid = r.id;
+        // Re-render so buttons get correct _fid
+        if (document.getElementById("fin-content")) refreshFinTab();
+      })
       .catch(function(e){ console.error("finAdd err:", e); });
   }
 }
@@ -4041,16 +4045,43 @@ function handleFinAction(action, fid, col, btn) {
     if (v) { v.active=true; v.approvedBy=cu.name; v.approvedAt=today(); finSave("vendors",v); showToast("Vendor approved!"); refreshFinTab(); }
   } else if (action === "approve-payment") {
     var p = FIN.payments.find(function(x){return x._fid===fid;});
-    if (p) { p.status="approved"; p.approvedBy=cu.name; p.approvedAt=today(); finSave("payments",p); showToast("Payment approved!"); refreshFinTab(); }
+    if (!p && FB_ENABLED && window._db && fid && fid !== "undefined") {
+      window._dbl.setDoc(window._dbl.doc(window._db,"fin_payments",fid),
+        {status:"approved",approvedBy:cu.name,approvedAt:today(),savedAt:new Date().toISOString()},{merge:true})
+      .then(function(){ showToast("✅ Payment approved!"); sendPaymentAlert("approved",fid); finLoad(); })
+      .catch(function(e){ showToast("Error: "+e.message); });
+      return;
+    }
+    if (p) { p.status="approved"; p.approvedBy=cu.name; p.approvedAt=today(); finSave("payments",p); sendPaymentAlert("approved",fid); showToast("✅ Payment approved!"); refreshFinTab(); }
   } else if (action === "reject-payment") {
     var reason = prompt("Rejection reason:");
     if (!reason) return;
     var p2 = FIN.payments.find(function(x){return x._fid===fid;});
     if (p2) { p2.status="rejected"; p2.rejectionReason=reason; finSave("payments",p2); showToast("Rejected!"); refreshFinTab(); }
   } else if (action === "mark-paid") {
-    if (!confirm("Mark as PAID?")) return;
+    if (!confirm("Mark this payment as PAID?")) return;
     var p3 = FIN.payments.find(function(x){return x._fid===fid;});
-    if (p3) { p3.status="paid"; p3.paidBy=cu.name; p3.paidAt=today(); finSave("payments",p3); showToast("Marked paid!"); refreshFinTab(); }
+    if (!p3) {
+      // Try direct Firebase update if not found in local array
+      if (FB_ENABLED && window._db && fid && fid !== "undefined") {
+        window._dbl.setDoc(
+          window._dbl.doc(window._db, "fin_payments", fid),
+          {status:"paid", paidBy:cu.name, paidAt:today(), savedAt:new Date().toISOString()},
+          {merge:true}
+        ).then(function(){
+          showToast("✅ Payment marked as PAID!");
+          sendPaymentAlert("paid", fid);
+          finLoad(); // reload fresh data
+        }).catch(function(e){ showToast("Error: " + e.message); });
+        return;
+      }
+      showToast("Payment not found — try refreshing"); return;
+    }
+    p3.status="paid"; p3.paidBy=cu.name; p3.paidAt=today();
+    finSave("payments", p3);
+    sendPaymentAlert("paid", fid);
+    showToast("✅ Payment marked as PAID!");
+    refreshFinTab();
   } else if (action === "ta-check") {
     var t2 = FIN.taLog.find(function(x){return x._fid===fid;});
     if (t2) { t2.status="checked"; t2.checkedBy=cu.name; finSave("taLog",t2); showToast("TA checked!"); refreshFinTab(); }
@@ -6120,6 +6151,36 @@ setInterval(function() {
     finLoad();
   }
 }, 5 * 60 * 1000);
+
+
+// Send in-app alert when payment status changes
+function sendPaymentAlert(newStatus, fid) {
+  if (!FB_ENABLED || !window._db) return;
+  var payment = FIN.payments.find(function(x){ return x._fid===fid; });
+  var desc = payment ? ("₹"+fmtN(payment.amount)+" | "+(payment.vendorName||"")+" | "+(payment.blockId||"")) : "Payment #"+fid;
+
+  var messages = {
+    "approved": { title:"Payment Approved ✅", body: desc + " — approved by " + cu.name + ". Ankita can now mark as paid.", roles:["finance"] },
+    "paid":     { title:"Payment Marked PAID 💰", body: desc + " — marked PAID by " + cu.name, roles:["head","manager"] },
+    "rejected": { title:"Payment Rejected ❌", body: desc + " — rejected by " + cu.name, roles:["manager"] }
+  };
+  var msg = messages[newStatus];
+  if (!msg) return;
+
+  var alertObj = {
+    type: "payment_" + newStatus,
+    title: msg.title,
+    body: msg.body,
+    for: msg.roles,
+    by: cu.name,
+    ts: new Date().toISOString(),
+    read: false,
+    paymentFid: fid
+  };
+  window._dbl.addDoc(window._dbl.collection(window._db, "alerts"), alertObj)
+    .then(function(){ updAlertBadge(); })
+    .catch(function(e){ console.log("alert err:", e); });
+}
 
 </script>
 
