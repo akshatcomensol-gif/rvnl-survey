@@ -217,7 +217,7 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
   <div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:44px 36px;width:400px;max-width:95vw">
     <div style="text-align:center;margin-bottom:28px">
       <div style="font-family:Rajdhani,sans-serif;font-size:28px;color:var(--gold);letter-spacing:3px;font-weight:700">COMENSOL</div>
-      <div style="color:var(--muted);font-size:11px;margin-top:4px;letter-spacing:1px">RVNL FIBER SURVEY - FIELD MANAGEMENT SYSTEM v7</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:4px;letter-spacing:1px">RVNL FIBER SURVEY - FIELD MANAGEMENT SYSTEM v8</div>
     </div>
     <div style="margin-bottom:14px">
       <label style="display:block;font-size:10px;color:var(--muted);margin-bottom:5px;letter-spacing:1px;text-transform:uppercase">Role</label>
@@ -266,7 +266,7 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
         <div>Share &#11014; &rarr; <strong style="color:#B8860B">Add to Home Screen</strong></div>
       </div>
       <div id="l-hint" style="text-align:center;color:var(--muted);font-size:11px;margin-top:14px;line-height:2.2">
-      field123 &nbsp;|&nbsp; review123 &nbsp;|&nbsp; dtp123<br>head123 &nbsp;|&nbsp; rvnl123
+      Contact Akshat Bansal for login credentials
     </div>
   </div>
 </div>
@@ -1465,7 +1465,7 @@ function openFormWith(bid) {
 // FIELD ENTRY FORM
 // ====================================================
 function renderSubmit() {
-  if (cu.role === "rvnl" || cu.role === "ie" || cu.role === "gis") return '<div class="be">Field entry is only available for Field and Manager roles.</div>';
+  if (cu.role === "rvnl" || cu.role === "ie" || cu.role === "gis" || cu.role === "finance") return '<div class="be">Field entry is only available for Field and Manager roles.</div>';
   var h = '<div class="card"><div class="ct">Brown Field Survey - Data Entry</div>';
   h += '<div class="bi">Evidence (photos/videos/SOR) is attached per span, per GP, per JC individually.</div>';
   h += '<div class="bw" style="font-size:11px"><strong>GPS Photos ke liye:</strong> Phone Settings &gt; Apps &gt; Camera &gt; Permissions &gt; Location &gt; Allow. Ya Google Maps se coordinates manually "Office Entry" mein daalo.</div>';
@@ -1522,7 +1522,7 @@ function renderSubmit() {
   h += '<div class="sh">Overall Block Remarks</div>';
   h += '<textarea class="ftarea" id="f-remarks" rows="3" placeholder="Block-level observations, access issues, pending items..."></textarea>';
   h += '<div class="btns">';
-  h += '<button class="btn btn-ghost" onclick="showToast(\'Draft saved locally!\')">Save Draft</button>';
+  h += '<button class="btn btn-ghost" onclick="saveDraftLocally()">&#128190; Save Draft</button>';
   h += '<button class="btn btn-gold" onclick="submitForReview()">Submit for Review</button>';
   h += '</div></div></div>';
   return h;
@@ -1763,35 +1763,35 @@ function addGPONRow(data) {
   h += '<button class="del-btn" onclick="event.stopPropagation();var c=document.getElementById(\'gpon-card-' + i + '\');if(c)c.parentNode.removeChild(c);updTabCounts()">&times;</button></div>';
   h += '<div class="item-body" id="gpon-body-' + i + '">';
   h += '<div class="frow f4">';
-  h += '<div class="fgrp"><label class="flbl">GP Name *</label><input class="finp' + ic + '" value="' + gn + '" placeholder="GP/Village name"></div>';
-  h += '<div class="fgrp"><label class="flbl">GP / LOC ID</label><input class="finp' + ic + '" value="' + gid + '" placeholder="GP-001"></div>';
-  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">GP Lat, Long *</label><input class="finp' + (ll?" imp":"") + '" value="' + ll + '" placeholder="27.0315, 80.7164"></div></div>';
+  h += '<div class="fgrp"><label class="flbl">GP Name *</label><input class="finp' + ic + '" id="gpon-gpname-' + i + '" value="' + gn + '" placeholder="GP/Village name"></div>';
+  h += '<div class="fgrp"><label class="flbl">GP / LOC ID</label><input class="finp' + ic + '" id="gpon-gpid-' + i + '" value="' + gid + '" placeholder="GP-001"></div>';
+  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel" id="gpon-phase-' + i + '"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">GP Lat, Long *</label><input class="finp' + (ll?" imp":"") + '" id="gpon-ll-' + i + '" value="' + ll + '" placeholder="27.0315, 80.7164"></div></div>';
   h += '<div class="frow f1"><div class="fgrp"><label class="flbl">Building Address</label><input class="finp' + (addr?" imp":"") + '" value="' + addr + '" placeholder="Full govt building address"></div></div>';
   h += '<div class="sh">ONT Details</div><div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">ONT Make</label><input class="finp' + (ontM?" imp":"") + '" value="' + ontM + '" placeholder="UTStarcom / HFCL"></div>';
   h += '<div class="fgrp"><label class="flbl">ONT Sr No</label><input class="finp' + (ontS?" imp":"") + '" value="' + ontS + '"></div>';
-  h += '<div class="fgrp"><label class="flbl">ONT Status *</label><select class="fsel"><option' + (ontSt==="Working"?" selected":"") + '>Working</option><option' + (ontSt==="Faulty"?" selected":"") + '>Faulty</option><option' + (ontSt==="Missing"?" selected":"") + '>Missing</option><option' + (ontSt==="Not Installed"?" selected":"") + '>Not Installed</option></select></div></div>';
+  h += '<div class="fgrp"><label class="flbl">ONT Status *</label><select class="fsel" id="gpon-ontst-' + i + '"><option' + (ontSt==="Working"?" selected":"") + '>Working</option><option' + (ontSt==="Faulty"?" selected":"") + '>Faulty</option><option' + (ontSt==="Missing"?" selected":"") + '>Missing</option><option' + (ontSt==="Not Installed"?" selected":"") + '>Not Installed</option></select></div></div>';
   h += '<div class="sh">CCU / Battery / Solar</div><div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">CCU Make</label><input class="finp' + (ccuM?" imp":"") + '" value="' + ccuM + '"></div>';
   h += '<div class="fgrp"><label class="flbl">CCU Capacity</label><input class="finp' + (ccuC?" imp":"") + '" value="' + ccuC + '" placeholder="48V/20Ah"></div>';
-  h += '<div class="fgrp"><label class="flbl">CCU Status</label><select class="fsel"><option' + (ccuSt==="Working"?" selected":"") + '>Working</option><option' + (ccuSt==="Faulty"?" selected":"") + '>Faulty</option><option' + (ccuSt==="Missing"?" selected":"") + '>Missing</option></select></div></div>';
+  h += '<div class="fgrp"><label class="flbl">CCU Status</label><select class="fsel" id="gpon-ccust-' + i + '"><option' + (ccuSt==="Working"?" selected":"") + '>Working</option><option' + (ccuSt==="Faulty"?" selected":"") + '>Faulty</option><option' + (ccuSt==="Missing"?" selected":"") + '>Missing</option></select></div></div>';
   h += '<div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">Battery Make</label><input class="finp' + (batM?" imp":"") + '" value="' + batM + '"></div>';
   h += '<div class="fgrp"><label class="flbl">Backup Hours</label><input class="finp' + (batB?" imp":"") + '" value="' + batB + '" type="number" placeholder="4"></div>';
-  h += '<div class="fgrp"><label class="flbl">Battery Status</label><select class="fsel"><option>Working</option><option>Faulty</option><option>Missing</option><option>Needs Replacement</option></select></div></div>';
+  h += '<div class="fgrp"><label class="flbl">Battery Status</label><select class="fsel" id="gpon-batst-' + i + '"><option>Working</option><option>Faulty</option><option>Missing</option><option>Needs Replacement</option></select></div></div>';
   h += '<div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">Solar Make</label><input class="finp' + (solM?" imp":"") + '" value="' + solM + '"></div>';
   h += '<div class="fgrp"><label class="flbl">Solar Capacity (W)</label><input class="finp' + (solC?" imp":"") + '" value="' + solC + '"></div>';
-  h += '<div class="fgrp"><label class="flbl">Solar Status</label><select class="fsel"><option' + (solSt==="Working"?" selected":"") + '>Working</option><option' + (solSt==="Not Working"?" selected":"") + '>Not Working</option><option>Not Installed</option></select></div></div>';
+  h += '<div class="fgrp"><label class="flbl">Solar Status</label><select class="fsel" id="gpon-solst-' + i + '"><option' + (solSt==="Working"?" selected":"") + '>Working</option><option' + (solSt==="Not Working"?" selected":"") + '>Not Working</option><option>Not Installed</option></select></div></div>';
   h += '<div class="sh">Additional Details</div><div class="frow f4">';
   h += '<div class="fgrp"><label class="flbl">GPON Cabinet</label><select class="fsel"><option>Yes</option><option>No</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">Earthing</label><select class="fsel"><option>Yes</option><option>No</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">Enclosure Condition</label><select class="fsel"><option>OK</option><option>Damaged</option><option>Not Installed</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">FTB Status</label><select class="fsel"><option>OK</option><option>Faulty</option><option>Not Installed</option></select></div></div>';
   h += '<div class="sh">Custodian & Signatures</div><div class="frow f3">';
-  h += '<div class="fgrp"><label class="flbl">Custodian Name *</label><input class="finp' + (cust?" imp":"") + '" value="' + cust + '" placeholder="Gram Pradhan name"></div>';
-  h += '<div class="fgrp"><label class="flbl">Custodian Mobile *</label><input class="finp' + (custM?" imp":"") + '" value="' + custM + '" type="tel" placeholder="9876543210"></div>';
+  h += '<div class="fgrp"><label class="flbl">Custodian Name *</label><input class="finp' + (cust?" imp":"") + '" id="gpon-cust-' + i + '" value="' + cust + '" placeholder="Gram Pradhan name"></div>';
+  h += '<div class="fgrp"><label class="flbl">Custodian Mobile *</label><input class="finp' + (custM?" imp":"") + '" id="gpon-custm-' + i + '" value="' + custM + '" type="tel" placeholder="9876543210"></div>';
   h += '<div class="fgrp"><label class="flbl">Access Period</label><input class="finp' + (accP?" imp":"") + '" value="' + accP + '" placeholder="10am-4pm weekdays"></div></div>';
   h += '<div class="frow f4">';
   h += '<div class="fgrp"><label class="flbl">IE Signature</label><select class="fsel"><option>Yes</option><option>No</option><option>Pending</option></select></div>';
@@ -1828,13 +1828,13 @@ function addJCRow(data) {
   h += '<button class="del-btn" onclick="event.stopPropagation();var c=document.getElementById(\'jc-card-' + i + '\');if(c)c.parentNode.removeChild(c);updTabCounts()">&times;</button></div>';
   h += '<div class="item-body" id="jc-body-' + i + '">';
   h += '<div class="frow f4">';
-  h += '<div class="fgrp"><label class="flbl">JC Name *</label><input class="finp' + ic + '" value="' + jn + '" placeholder="SJC-14 / BJC-04"></div>';
-  h += '<div class="fgrp"><label class="flbl">JC Type</label><select class="fsel"><option' + (jt==="24F"?" selected":"") + '>24F</option><option' + (jt==="48F"?" selected":"") + '>48F</option><option' + (jt==="96F"?" selected":"") + '>96F</option><option' + (jt==="144F"?" selected":"") + '>144F</option><option' + (jt==="288F"?" selected":"") + '>288F</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">GIS Lat/Long</label><input class="finp' + ic + '" value="' + gl + '" placeholder="As per shapefile"></div>';
-  h += '<div class="fgrp"><label class="flbl">Actual Lat/Long (Field) *</label><input class="finp' + (al?" imp":"") + '" value="' + al + '" placeholder="Field DGPS reading"></div></div>';
+  h += '<div class="fgrp"><label class="flbl">JC Name *</label><input class="finp' + ic + '" id="jc-name-' + i + '" value="' + jn + '" placeholder="SJC-14 / BJC-04"></div>';
+  h += '<div class="fgrp"><label class="flbl">JC Type</label><select class="fsel" id="jc-type-' + i + '"><option' + (jt==="24F"?" selected":"") + '>24F</option><option' + (jt==="48F"?" selected":"") + '>48F</option><option' + (jt==="96F"?" selected":"") + '>96F</option><option' + (jt==="144F"?" selected":"") + '>144F</option><option' + (jt==="288F"?" selected":"") + '>288F</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">GIS Lat/Long</label><input class="finp' + ic + '" id="jc-gisl-' + i + '" value="' + gl + '" placeholder="As per shapefile"></div>';
+  h += '<div class="fgrp"><label class="flbl">Actual Lat/Long (Field) *</label><input class="finp' + (al?" imp":"") + '" id="jc-actl-' + i + '" value="' + al + '" placeholder="Field DGPS reading"></div></div>';
   h += '<div class="frow f3">';
-  h += '<div class="fgrp"><label class="flbl">JC Condition</label><select class="fsel"><option' + (jcond==="Good"?" selected":"") + '>Good</option><option' + (jcond==="Damaged"?" selected":"") + '>Damaged</option><option' + (jcond==="Missing"?" selected":"") + '>Missing</option><option>Needs Replacement</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">Chamber Condition</label><select class="fsel"><option' + (cc==="Good"?" selected":"") + '>Good</option><option' + (cc==="Damaged"?" selected":"") + '>Damaged</option><option>Flooded</option><option' + (cc==="Missing Cover"?" selected":"") + '>Missing Cover</option><option>Collapsed</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">JC Condition</label><select class="fsel" id="jc-cond-' + i + '"><option' + (jcond==="Good"?" selected":"") + '>Good</option><option' + (jcond==="Damaged"?" selected":"") + '>Damaged</option><option' + (jcond==="Missing"?" selected":"") + '>Missing</option><option>Needs Replacement</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">Chamber Condition</label><select class="fsel" id="jc-cham-' + i + '"><option' + (cc==="Good"?" selected":"") + '>Good</option><option' + (cc==="Damaged"?" selected":"") + '>Damaged</option><option>Flooded</option><option' + (cc==="Missing Cover"?" selected":"") + '>Missing Cover</option><option>Collapsed</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">Remark</label><input class="finp" placeholder="Field observation"></div></div>';
   h += '<div class="ev-section"><div class="ev-title">Evidence for this JC</div>';
   h += '<div class="ev-grid">' + buildEvSlot("jc",i,"photos") + buildEvSlot("jc",i,"videos") + '</div>';
@@ -1891,21 +1891,61 @@ function submitForReview() {
   }
   var gpCards = document.querySelectorAll("#gpon-rows .item-card");
   for (var k = 0; k < gpCards.length; k++) {
-    var gEvPh = (window._evUrls && window._evUrls["gpon_"+(k+1)+"_photos"]) ? window._evUrls["gpon_"+(k+1)+"_photos"] : {urls:[],count:0};
-    var gEvVd = (window._evUrls && window._evUrls["gpon_"+(k+1)+"_videos"]) ? window._evUrls["gpon_"+(k+1)+"_videos"] : {urls:[],count:0};
-    gponData.push({srNo:k+1, gpName:"GP "+(k+1), ontStatus:"Working", ccuStatus:"Working",
-      batStatus:"Working", solarStatus:"Working", custName:"", custMobile:"",
-      evidence:{photos:gEvPh.count||gEvPh.urls.length, videos:gEvVd.count||gEvVd.urls.length,
-        photoUrls:gEvPh.urls||[], videoUrls:gEvVd.urls||[]}});
+    var gn = k + 1;
+    var gEvPh = (window._evUrls && window._evUrls["gpon_"+gn+"_photos"]) ? window._evUrls["gpon_"+gn+"_photos"] : {urls:[],count:0};
+    var gEvVd = (window._evUrls && window._evUrls["gpon_"+gn+"_videos"]) ? window._evUrls["gpon_"+gn+"_videos"] : {urls:[],count:0};
+    var gpNameEl   = document.getElementById("gpon-gpname-"+gn);
+    var gpIdEl     = document.getElementById("gpon-gpid-"+gn);
+    var gpPhaseEl  = document.getElementById("gpon-phase-"+gn);
+    var gpLLEl     = document.getElementById("gpon-ll-"+gn);
+    var gpOntStEl  = document.getElementById("gpon-ontst-"+gn);
+    var gpCcuStEl  = document.getElementById("gpon-ccust-"+gn);
+    var gpBatStEl  = document.getElementById("gpon-batst-"+gn);
+    var gpSolStEl  = document.getElementById("gpon-solst-"+gn);
+    var gpCustEl   = document.getElementById("gpon-cust-"+gn);
+    var gpCustMEl  = document.getElementById("gpon-custm-"+gn);
+    gponData.push({
+      srNo: gn,
+      gpName:    gpNameEl  ? gpNameEl.value.trim()  : ("GP "+gn),
+      gpId:      gpIdEl    ? gpIdEl.value.trim()    : "",
+      phase:     gpPhaseEl ? gpPhaseEl.value        : "PH-2",
+      latlong:   gpLLEl    ? gpLLEl.value.trim()    : "",
+      ontStatus: gpOntStEl ? gpOntStEl.value        : "Working",
+      ccuStatus: gpCcuStEl ? gpCcuStEl.value        : "Working",
+      batStatus: gpBatStEl ? gpBatStEl.value        : "Working",
+      solarStatus:gpSolStEl? gpSolStEl.value        : "Working",
+      custName:  gpCustEl  ? gpCustEl.value.trim()  : "",
+      custMobile:gpCustMEl ? gpCustMEl.value.trim() : "",
+      evidence:{
+        photos:gEvPh.count||gEvPh.urls.length, videos:gEvVd.count||gEvVd.urls.length,
+        photoUrls:gEvPh.urls||[], videoUrls:gEvVd.urls||[]
+      }
+    });
   }
   var jcCards = document.querySelectorAll("#jc-rows .item-card");
   for (var l = 0; l < jcCards.length; l++) {
-    var jEvPh = (window._evUrls && window._evUrls["jc_"+(l+1)+"_photos"]) ? window._evUrls["jc_"+(l+1)+"_photos"] : {urls:[],count:0};
-    var jEvVd = (window._evUrls && window._evUrls["jc_"+(l+1)+"_videos"]) ? window._evUrls["jc_"+(l+1)+"_videos"] : {urls:[],count:0};
-    jcData.push({srNo:l+1, jcName:"JC "+(l+1), jcType:"48F", jcCondition:"Good",
-      chamberCondition:"Good", gisLatlong:"", actualLatlong:"",
-      evidence:{photos:jEvPh.count||jEvPh.urls.length, videos:jEvVd.count||jEvVd.urls.length,
-        photoUrls:jEvPh.urls||[], videoUrls:jEvVd.urls||[]}});
+    var jn = l + 1;
+    var jEvPh = (window._evUrls && window._evUrls["jc_"+jn+"_photos"]) ? window._evUrls["jc_"+jn+"_photos"] : {urls:[],count:0};
+    var jEvVd = (window._evUrls && window._evUrls["jc_"+jn+"_videos"]) ? window._evUrls["jc_"+jn+"_videos"] : {urls:[],count:0};
+    var jcNameEl  = document.getElementById("jc-name-"+jn);
+    var jcTypeEl  = document.getElementById("jc-type-"+jn);
+    var jcGisLEl  = document.getElementById("jc-gisl-"+jn);
+    var jcActLEl  = document.getElementById("jc-actl-"+jn);
+    var jcCondEl  = document.getElementById("jc-cond-"+jn);
+    var jcChamEl  = document.getElementById("jc-cham-"+jn);
+    jcData.push({
+      srNo: jn,
+      jcName:          jcNameEl ? jcNameEl.value.trim()  : ("JC "+jn),
+      jcType:          jcTypeEl ? jcTypeEl.value         : "48F",
+      gisLatlong:      jcGisLEl ? jcGisLEl.value.trim()  : "",
+      actualLatlong:   jcActLEl ? jcActLEl.value.trim()  : "",
+      jcCondition:     jcCondEl ? jcCondEl.value         : "Good",
+      chamberCondition:jcChamEl ? jcChamEl.value         : "Good",
+      evidence:{
+        photos:jEvPh.count||jEvPh.urls.length, videos:jEvVd.count||jEvVd.urls.length,
+        photoUrls:jEvPh.urls||[], videoUrls:jEvVd.urls||[]
+      }
+    });
   }
   if (ofcData.length === 0 && gponData.length === 0) {
     alert("Please add at least one OFC span or GP."); return;
@@ -1926,8 +1966,39 @@ function submitForReview() {
   submissions.push(sub);
   updBadge();
   saveToFirebase(sub);
-  showToast("Submitted for review!");
+  clearDraft(bid); // remove local draft on successful submit
+  showToast("&#10003; Submitted for review!");
   gp("dashboard");
+}
+
+
+// ====================================================
+// DRAFT SAVE / RESTORE
+// ====================================================
+function saveDraftLocally() {
+  var bid = getV("f-block");
+  if (!bid) { showToast("Block select karo pehle!"); return; }
+  try {
+    var draftData = {
+      bid: bid,
+      date: getV("f-date"),
+      remarks: getV("f-remarks"),
+      gpsLat: gpsCoords ? gpsCoords.lat : "",
+      gpsLng: gpsCoords ? gpsCoords.lng : "",
+      savedAt: new Date().toISOString(),
+      ofcCount: document.querySelectorAll("#ofc-rows .item-card").length,
+      gponCount: document.querySelectorAll("#gpon-rows .item-card").length,
+      jcCount: document.querySelectorAll("#jc-rows .item-card").length
+    };
+    localStorage.setItem("comensol_draft_" + bid, JSON.stringify(draftData));
+    showToast("&#128190; Draft saved! " + new Date().toLocaleTimeString("en-IN") + " — " + draftData.ofcCount + " spans, " + draftData.gponCount + " GPs, " + draftData.jcCount + " JCs");
+  } catch(e) {
+    showToast("Draft save failed: " + e.message);
+  }
+}
+
+function clearDraft(bid) {
+  try { localStorage.removeItem("comensol_draft_" + bid); } catch(e) {}
 }
 
 // ====================================================
@@ -3317,15 +3388,15 @@ function addManGPONRow(data) {
     h += '<div class="fgrp"><label class="flbl">GP Name *</label><input class="finp' + ic + '" id="mgpon-name-' + i + '" value="' + gn + '" placeholder="Village GP name"></div>';
   }
   h += '<div class="fgrp"><label class="flbl">GP ID</label><input class="finp' + ic + '" value="' + gid + '" placeholder="GP-001"></div>';
-  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">Manual Lat, Long *</label><input class="finp' + (ll?" imp":"") + '" value="' + ll + '" placeholder="27.4215, 80.1234"></div></div>';
+  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel" id="gpon-phase-' + i + '"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">Manual Lat, Long *</label><input class="finp' + (ll?" imp":"") + '" id="mgpon-ll-' + i + '" value="' + ll + '" placeholder="27.4215, 80.1234"></div></div>';
   h += '<div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">GPS Source *</label><select class="fsel"><option>Google Maps - field team ne bheja</option><option>DGPS device register</option><option>Excel shapefile se</option><option>Approx - nearest road se</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">ONT Status</label><select class="fsel"><option>Working</option><option>Faulty</option><option>Missing</option><option>Not Installed</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">Solar Status</label><select class="fsel"><option>Working</option><option>Not Working</option><option>Not Installed</option></select></div></div>';
+  h += '<div class="fgrp"><label class="flbl">ONT Status</label><select class="fsel" id="mgpon-ontst-' + i + '"><option>Working</option><option>Faulty</option><option>Missing</option><option>Not Installed</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">Solar Status</label><select class="fsel" id="mgpon-solst-' + i + '"><option>Working</option><option>Not Working</option><option>Not Installed</option></select></div></div>';
   h += '<div class="frow f3">';
-  h += '<div class="fgrp"><label class="flbl">Custodian Name</label><input class="finp' + (cust?" imp":"") + '" value="' + cust + '" placeholder="Gram Pradhan"></div>';
-  h += '<div class="fgrp"><label class="flbl">Custodian Mobile</label><input class="finp' + (custM?" imp":"") + '" value="' + custM + '" placeholder="9876543210" type="tel"></div>';
+  h += '<div class="fgrp"><label class="flbl">Custodian Name</label><input class="finp' + (cust?" imp":"") + '" id="mgpon-cust-' + i + '" value="' + cust + '" placeholder="Gram Pradhan"></div>';
+  h += '<div class="fgrp"><label class="flbl">Custodian Mobile</label><input class="finp' + (custM?" imp":"") + '" id="mgpon-custm-' + i + '" value="' + custM + '" placeholder="9876543210" type="tel"></div>';
   h += '<div class="fgrp"><label class="flbl">Access Period</label><input class="finp" placeholder="10am-4pm"></div></div>';
   h += '<div class="ev-section"><div class="ev-title">Attach GP Evidence (WhatsApp photos se)</div>';
   h += '<div class="ev-grid">' + buildOfficeEvSlot("mgpon", i, "photos") + buildOfficeEvSlot("mgpon", i, "videos") + '</div>';
@@ -3527,16 +3598,47 @@ function submitManual() {
   }
   var gpCards = document.querySelectorAll("#m-gpon-rows .item-card");
   for (var k = 0; k < gpCards.length; k++) {
-    gponData.push({srNo:k+1, gpName:"GP "+(k+1), ontStatus:"Working", ccuStatus:"Working",
-      batStatus:"Working", solarStatus:"Working", custName:"", custMobile:"",
-      manualGPS:true, evidence:(function(){ var e=window._evUrls&&window._evUrls["mgpon_"+(k+1)+"_photos"]; var ev=window._evUrls&&window._evUrls["mgpon_"+(k+1)+"_videos"]; return {photos:e?e.count:0,videos:ev?ev.count:0,photoUrls:e?e.urls:[],videoUrls:ev?ev.urls:[]}; })()});
+    var mg = k + 1;
+    var mgNameEl   = document.getElementById("mgpon-name-"+mg);
+    var mgOntEl    = document.getElementById("mgpon-ontst-"+mg);
+    var mgSolEl    = document.getElementById("mgpon-solst-"+mg);
+    var mgCustEl   = document.getElementById("mgpon-cust-"+mg);
+    var mgCustMEl  = document.getElementById("mgpon-custm-"+mg);
+    var mgLLEl     = document.getElementById("mgpon-ll-"+mg);
+    var mgPhaseEl  = document.getElementById("mgpon-phase-"+mg);
+    gponData.push({
+      srNo: mg,
+      gpName:     mgNameEl  ? (mgNameEl.tagName==="SELECT" ? mgNameEl.options[mgNameEl.selectedIndex].value : mgNameEl.value.trim()) : ("GP "+mg),
+      phase:      mgPhaseEl ? mgPhaseEl.value : "PH-2",
+      latlong:    mgLLEl    ? mgLLEl.value.trim() : "",
+      ontStatus:  mgOntEl   ? mgOntEl.value  : "Working",
+      solarStatus:mgSolEl   ? mgSolEl.value  : "Working",
+      custName:   mgCustEl  ? mgCustEl.value.trim()  : "",
+      custMobile: mgCustMEl ? mgCustMEl.value.trim() : "",
+      manualGPS:true,
+      evidence:(function(){ var e=window._evUrls&&window._evUrls["mgpon_"+mg+"_photos"]; var ev=window._evUrls&&window._evUrls["mgpon_"+mg+"_videos"]; return {photos:e?e.count:0,videos:ev?ev.count:0,photoUrls:e?e.urls:[],videoUrls:ev?ev.urls:[]}; })()
+    });
   }
   var jcCards = document.querySelectorAll("#m-jc-rows .item-card");
   for (var l = 0; l < jcCards.length; l++) {
-    var alEl = document.getElementById("mjc-al-" + (l+1));
-    jcData.push({srNo:l+1, jcName:"JC "+(l+1), jcType:"48F", jcCondition:"Good",
-      chamberCondition:"Good", gisLatlong:"", actualLatlong:alEl?alEl.value:"",
-      manualGPS:true, evidence:(function(){ var e=window._evUrls&&window._evUrls["mjc_"+(l+1)+"_photos"]; var ev=window._evUrls&&window._evUrls["mjc_"+(l+1)+"_videos"]; return {photos:e?e.count:0,videos:ev?ev.count:0,photoUrls:e?e.urls:[],videoUrls:ev?ev.urls:[]}; })()});
+    var mj = l + 1;
+    var mjNameEl = document.getElementById("mjc-name-"+mj);
+    var mjTypeEl = document.getElementById("mjc-type-"+mj);
+    var mjGisEl  = document.getElementById("mjc-gisl-"+mj);
+    var mjActEl  = document.getElementById("mjc-al-"+mj);
+    var mjCondEl = document.getElementById("mjc-cond-"+mj);
+    var mjChamEl = document.getElementById("mjc-cham-"+mj);
+    jcData.push({
+      srNo: mj,
+      jcName:          mjNameEl ? (mjNameEl.tagName==="SELECT" ? mjNameEl.options[mjNameEl.selectedIndex].value : mjNameEl.value.trim()) : ("JC "+mj),
+      jcType:          mjTypeEl ? mjTypeEl.value : "48F",
+      gisLatlong:      mjGisEl  ? mjGisEl.value.trim()  : "",
+      actualLatlong:   mjActEl  ? mjActEl.value.trim()  : "",
+      jcCondition:     mjCondEl ? mjCondEl.value : "Good",
+      chamberCondition:mjChamEl ? mjChamEl.value : "Good",
+      manualGPS:true,
+      evidence:(function(){ var e=window._evUrls&&window._evUrls["mjc_"+mj+"_photos"]; var ev=window._evUrls&&window._evUrls["mjc_"+mj+"_videos"]; return {photos:e?e.count:0,videos:ev?ev.count:0,photoUrls:e?e.urls:[],videoUrls:ev?ev.urls:[]}; })()
+    });
   }
   var gpsSrc = document.getElementById("m-gpssrc") ? document.getElementById("m-gpssrc").value : "Manual entry";
   var sub = {
@@ -4265,7 +4367,9 @@ function renderFinance() {
     {id:"fin-exp",    label:"&#128179; Expenses",     roles:["head","finance"]},
     {id:"fin-ta",     label:"&#128664; TA / DA",      roles:["head","manager","supervisor","finance"]},
     {id:"fin-att",    label:"&#128100; Attendance",   roles:["head","manager"]},
-    {id:"fin-report", label:"&#128202; Reports",      roles:["head","finance"]},
+    {id:"fin-report",      label:"&#128202; Reports",      roles:["head","finance"]},
+    {id:"fin-fieldreport", label:"&#128203; Daily Report",  roles:["head","manager","review","supervisor"]},
+    {id:"fin-docs",        label:"&#128196; Documents",     roles:["head","finance","manager"]},
   ];
   var tabs = allTabs.filter(function(t){ return t.roles.indexOf(role) >= 0; });
   if (!tabs.length) return "<div class='be'>Finance access nahi hai.</div>";
@@ -4285,14 +4389,16 @@ function renderFinance() {
 }
 
 function renderFinTab(id) {
-  if (id === "fin-fund")   return rFund();
-  if (id === "fin-vendor") return rVendor();
-  if (id === "fin-work")   return rWork();
-  if (id === "fin-pay")    return rPay();
-  if (id === "fin-exp")    return rExp();
-  if (id === "fin-ta")     return rTA();
-  if (id === "fin-att")    return rAtt();
-  if (id === "fin-report") return rReport();
+  if (id === "fin-fund")        return rFund();
+  if (id === "fin-vendor")      return rVendor();
+  if (id === "fin-work")        return rWork();
+  if (id === "fin-pay")         return rPay();
+  if (id === "fin-exp")         return rExp();
+  if (id === "fin-ta")          return rTA();
+  if (id === "fin-att")         return rAtt();
+  if (id === "fin-report")      return rReport();
+  if (id === "fin-fieldreport") return rFieldReport ? rFieldReport() : "<div class='bi'>Loading...</div>";
+  if (id === "fin-docs")        return rDocs ? rDocs() : "<div class='bi'>Loading...</div>";
   return "";
 }
 
@@ -4741,7 +4847,7 @@ function rAtt() {
   h += "<button class='btn btn-gold' data-modal='att-rate'>Set Daily Rates</button>";
   h += "<button class='btn btn-ghost' onclick='exportAttExcel()'>&#128229; Excel</button>";
   h += "</div></div>";
-  h += "<div style='font-size:10px;color:var(--muted);margin-bottom:8px'>Debug: live=" + (attendanceLog||[]).length + " firebase=" + (FIN.attendance||[]).length + " sessions=" + (_sessionLogAtt||[]).length + " total=" + records.length + "</div>";
+  // Debug line removed for production
 
   // Summary table
   var people = Object.values(byPerson);
@@ -5905,15 +6011,7 @@ function enhanceGISMap() {
 
 // Override initGISMap to add survey data
 var _origInitGIS = window.initGISMap;
-function initGISMap() {
-  if (_origInitGIS) _origInitGIS();
-  // After map loads, add survey overlay
-  setTimeout(function() {
-    try { enhanceGISMap(); } catch(e) { console.log("GIS enhance err:", e); }
-  }, 1500);
-}
 
-// Add refresh GIS button handler
 function refreshGISOverlay() {
   try { enhanceGISMap(); showToast("GIS overlay refreshed!"); }
   catch(e) { showToast("GIS error: " + e.message); }
