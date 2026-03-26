@@ -2760,41 +2760,26 @@ function saveNewUser() {
   }
   var newUser = {role:role, name:name, pwd:pwd};
   USERS.push(newUser);
-  // Save to Firebase
   if (FB_ENABLED && window._db) {
     window._dbl.addDoc(window._dbl.collection(window._db, "users"), newUser)
-      .then(function(r) {
-        newUser._fid = r.id;
-        showToast("✅ " + name + " added & saved to cloud!");
-      })
-      .catch(function(e) { showToast("Added locally. Cloud save failed: " + e.message); });
-  } else {
-    showToast(name + " added (local only)");
-  }
+      .then(function(r) { newUser._fid = r.id; showToast("✅ " + name + " added & saved to cloud!"); })
+      .catch(function(e) { showToast("Added locally. Cloud: " + e.message); });
+  } else { showToast(name + " added (local only)"); }
   cm("modal-adduser"); gp("users");
 }
 
 function removeUser(name, role) {
   if (!confirm("Remove " + name + " from team?")) return;
-  // Find Firebase ID if exists
   var fid = null;
   for (var i = 0; i < USERS.length; i++) {
-    if (USERS[i].name === name && USERS[i].role === role) {
-      fid = USERS[i]._fid || null;
-      break;
-    }
+    if (USERS[i].name === name && USERS[i].role === role) { fid = USERS[i]._fid || null; break; }
   }
   USERS = USERS.filter(function(u){ return !(u.name===name && u.role===role); });
-  // Delete from Firebase
   if (fid && FB_ENABLED && window._db) {
-    window._dbl.setDoc(
-      window._dbl.doc(window._db, "users", fid),
-      {deleted: true}, {merge: true}
-    ).then(function(){ showToast(name + " removed from cloud!"); })
-     .catch(function(e){ showToast("Removed locally. Cloud: " + e.message); });
-  } else {
-    showToast(name + " removed (local)");
-  }
+    window._dbl.setDoc(window._dbl.doc(window._db, "users", fid), {deleted:true}, {merge:true})
+      .then(function(){ showToast(name + " removed from cloud!"); })
+      .catch(function(e){ showToast("Removed. Cloud: " + e.message); });
+  } else { showToast(name + " removed."); }
   gp("users");
 }
 
@@ -2804,16 +2789,11 @@ function changePwd(role) {
   np = np.trim();
   ROLE_PWDS[role] = np;
   for (var i = 0; i < USERS.length; i++) { if (USERS[i].role === role) USERS[i].pwd = np; }
-  // Save to Firebase - store role password
   if (FB_ENABLED && window._db) {
-    window._dbl.setDoc(
-      window._dbl.doc(window._db, "settings", "rolePwds"),
-      ROLE_PWDS, {merge: true}
-    ).then(function(){ showToast("✅ Password saved to cloud for " + role); })
-     .catch(function(e){ showToast("Updated locally. Cloud: " + e.message); });
-  } else {
-    showToast("Password updated (local only)");
-  }
+    window._dbl.setDoc(window._dbl.doc(window._db, "settings", "rolePwds"), ROLE_PWDS, {merge:true})
+      .then(function(){ showToast("✅ Password saved to cloud for " + role); })
+      .catch(function(e){ showToast("Updated locally. Cloud: " + e.message); });
+  } else { showToast("Password updated for " + role); }
   gp("users");
 }
 
@@ -5923,59 +5903,32 @@ async function saveChangePwd() {
   var current = (document.getElementById("pwd-current")||{}).value || "";
   var newPwd  = (document.getElementById("pwd-new")||{}).value || "";
   var confirm2= (document.getElementById("pwd-confirm")||{}).value || "";
-
   if (!current) { alert("Current password required!"); return; }
   if (!newPwd || newPwd.length < 4) { alert("New password min 4 characters!"); return; }
   if (newPwd !== confirm2) { alert("Passwords do not match!"); return; }
-
-  // Verify current password
-  var userInList = USERS.find(function(u) {
-    return u.name === cu.name && u.role === cu.role && u.pwd === current;
-  });
-  // Also check role password
-  if (!userInList && ROLE_PWDS[cu.role] !== current) {
-    alert("Current password is incorrect!");
-    return;
-  }
-
-  // Update in USERS array
-  USERS.forEach(function(u) {
-    if (u.name === cu.name && u.role === cu.role) u.pwd = newPwd;
-  });
-  // Update ROLE_PWDS if it matches (for single-user roles)
-  if (ROLE_PWDS[cu.role] === current) {
-    ROLE_PWDS[cu.role] = newPwd;
-  }
-
-  // Save to Firebase
+  var userInList = USERS.find(function(u){ return u.name===cu.name && u.role===cu.role && u.pwd===current; });
+  if (!userInList && ROLE_PWDS[cu.role] !== current) { alert("Current password is incorrect!"); return; }
+  USERS.forEach(function(u){ if (u.name===cu.name && u.role===cu.role) u.pwd = newPwd; });
+  if (ROLE_PWDS[cu.role] === current) ROLE_PWDS[cu.role] = newPwd;
   if (FB_ENABLED && window._db) {
     try {
-      // Find or create user doc
       var snap = await window._dbl.getDocs(window._dbl.collection(window._db, "users"));
-      var userDocId = null;
-      snap.forEach(function(d) {
-        if (d.data().name === cu.name && d.data().role === cu.role) userDocId = d.id;
-      });
-      if (userDocId) {
-        await window._dbl.setDoc(
-          window._dbl.doc(window._db, "users", userDocId),
-          {pwd: newPwd, name: cu.name, role: cu.role}, {merge: true}
-        );
+      var uid = null;
+      snap.forEach(function(d){ if (d.data().name===cu.name && d.data().role===cu.role) uid=d.id; });
+      if (uid) {
+        await window._dbl.setDoc(window._dbl.doc(window._db,"users",uid), {pwd:newPwd,name:cu.name,role:cu.role},{merge:true});
       } else {
-        await window._dbl.addDoc(window._dbl.collection(window._db, "users"), {
-          name: cu.name, role: cu.role, pwd: newPwd
-        });
+        await window._dbl.addDoc(window._dbl.collection(window._db,"users"), {name:cu.name,role:cu.role,pwd:newPwd});
       }
       document.getElementById("pwd-modal").classList.remove("open");
       showToast("✅ Password saved to cloud!");
     } catch(e) {
       document.getElementById("pwd-modal").classList.remove("open");
-      showToast("Password changed locally. Cloud: " + e.message);
+      showToast("Changed locally. Cloud: " + e.message);
     }
   } else {
     document.getElementById("pwd-modal").classList.remove("open");
     showToast("Password changed (local only)");
   }
 }
-
 
