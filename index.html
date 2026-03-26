@@ -598,13 +598,13 @@ function initFirebase() {
   var cfg = JSON.stringify(FB_CONFIG);
   s.textContent =
     'import {initializeApp} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";' +
-    'import {getFirestore,collection,addDoc,getDocs,query,orderBy,doc,updateDoc,setDoc} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";' +
+    'import {getFirestore,collection,addDoc,getDocs,query,orderBy,doc,updateDoc,setDoc,onSnapshot,deleteDoc} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";' +
     'import {getStorage,ref,uploadBytes,getDownloadURL} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";' +
     'var app=initializeApp(' + cfg + ');' +
     'window._db=getFirestore(app);' +
     'window._st=getStorage(app);' +
     'window._stl={ref,uploadBytes,getDownloadURL};' +
-    'window._dbl={collection,addDoc,getDocs,query,orderBy,doc,updateDoc,setDoc};' +
+    'window._dbl={collection,addDoc,getDocs,query,orderBy,doc,updateDoc,setDoc,onSnapshot,deleteDoc};' +
     'document.getElementById("fb-status").innerHTML="<span class=\'fb-badge fb-on\'>Cloud Connected</span>";' +
     'if(window._fbReady)window._fbReady();';
   document.head.appendChild(s);
@@ -3899,40 +3899,27 @@ function finSave(col, obj) {
 function finLoad() {
   if (!FB_ENABLED || !window._db) return;
   var cols = ["funds","vendors","workLog","payments","expenses","taLog","attendance"];
-  var loaded = 0;
+  var total = cols.length; var loaded = 0;
   cols.forEach(function(col) {
-    // Use onSnapshot for real-time updates
-    try {
-      window._dbl.onSnapshot(
-        window._dbl.collection(window._db, "fin_"+col),
-        function(snap) {
-          FIN[col] = [];
-          snap.forEach(function(d){
-            var data = d.data();
-            if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
-          });
-          loaded++;
-          // Refresh current finance tab automatically
-          if (document.getElementById("fin-content")) {
-            refreshFinTab();
-          }
-          // Also refresh attendance badge for head
-          if (col === "attendance") updAttBadge();
-        },
-        function(e){ console.log("finSnapshot err "+col, e); }
-      );
-    } catch(ex) {
-      // Fallback to getDocs if onSnapshot not available
-      window._dbl.getDocs(window._dbl.collection(window._db, "fin_"+col))
-        .then(function(snap) {
-          FIN[col] = [];
-          snap.forEach(function(d){
-            var data = d.data();
-            if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
-          });
-        }).catch(function(e){ console.log("finLoad err "+col, e); });
-    }
+    window._dbl.getDocs(window._dbl.collection(window._db, "fin_"+col))
+      .then(function(snap) {
+        FIN[col] = [];
+        snap.forEach(function(d){
+          var data = d.data();
+          if (!data.deleted) FIN[col].push(Object.assign({_fid:d.id}, data));
+        });
+        loaded++;
+        if (loaded === total) {
+          refreshFinTab();
+          updAttBadge();
+          showToast("Finance data loaded!");
+        }
+      }).catch(function(e){ console.log("finLoad err "+col, e); });
   });
+}
+
+function finReload() {
+  finLoad();
 }
 
 function updAttBadge() {
