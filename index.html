@@ -1281,7 +1281,7 @@ function renderImport() {
     h += '</div></div>';
     h += '<div class="fgrp" style="align-self:center"><div id="gis-import-status" class="bw" style="margin:0">No file selected</div></div>';
     h += '</div>';
-    h += '<div class="btns"><button class="btn btn-ghost" style="font-size:12px" onclick="gp('gismap')">&#127758; GIS Map pe dekho</button></div>';
+    h += '<div class="btns"><button class="btn btn-ghost" style="font-size:12px" onclick="gp(&quot;gismap&quot;)">&#127758; GIS Map pe dekho</button></div>';
     h += '</div>';
   }
 
@@ -1534,6 +1534,7 @@ function onBlockSelect() {
   curFormBlock = null;
   for (var i = 0; i < BLOCKS.length; i++) { if (BLOCKS[i].id === bid) { curFormBlock = BLOCKS[i]; break; } }
   ofcIdx = 0; gponIdx = 0; jcIdx = 0;
+  window._evUrls = {}; // clear evidence from previous block selection
   document.getElementById("form-body").style.display = "block";
   document.getElementById("ofc-rows").innerHTML = "";
   document.getElementById("gpon-rows").innerHTML = "";
@@ -1967,6 +1968,9 @@ function submitForReview() {
   updBadge();
   saveToFirebase(sub);
   clearDraft(bid); // remove local draft on successful submit
+  window._evUrls = {}; // clear evidence state
+  gpsCoords = null; // clear GPS state
+  ofcIdx = 0; gponIdx = 0; jcIdx = 0;
   showToast("&#10003; Submitted for review!");
   gp("dashboard");
 }
@@ -2283,11 +2287,11 @@ function approveSubmission(id) {
   var s = null;
   for (var i = 0; i < submissions.length; i++) { if (submissions[i].id === id) { s = submissions[i]; break; } }
   if (!s) return;
-  s.wfStatus = "rvnl";
-  s.history.push({ts: new Date().toLocaleString("en-IN"), by: cu.name, action: "QC Approved & Sent to RVNL by " + cu.name});
+  s.wfStatus = "approved";
+  s.history.push({ts: new Date().toLocaleString("en-IN"), by: cu.name, action: "QC Approved by " + cu.name});
   updBadge();
   saveToFirebase(s);
-  showToast("Approved & sent to RVNL!");
+  showToast("&#10003; QC Approved! Review section mein 'Send to RVNL' karo.");
   gp("review");
 }
 
@@ -2305,6 +2309,7 @@ function sendCorrection() {
   curSub.wfStatus = "correction";
   curSub.correctionNote = note;
   curSub.history.push({ts: new Date().toLocaleString("en-IN"), by: cu.name, action: "Returned for correction: " + note});
+  saveToFirebase(curSub); // persist correction status to Firebase
   updBadge(); cm("modal-corr"); showToast("Returned for correction."); gp("review");
 }
 
@@ -2315,6 +2320,7 @@ function sendToRVNL(id) {
   if (!s) return;
   s.wfStatus = "rvnl";
   s.history.push({ts: new Date().toLocaleString("en-IN"), by: cu.name, action: "Sent to RVNL/IE for final approval"});
+  saveToFirebase(s); // persist to Firebase
   showToast("Sent to RVNL/IE!"); gp("review");
 }
 
@@ -2364,9 +2370,36 @@ function renderBlocks() {
   return h;
 }
 
+
+function loadBlockStatusFromFirebase() {
+  if (!FB_ENABLED || !window._db) return;
+  window._dbl.getDocs(window._dbl.collection(window._db, "blockStatus"))
+    .then(function(snap) {
+      snap.forEach(function(d) {
+        var data = d.data();
+        if (data.id && data.status) {
+          for (var i = 0; i < BLOCKS.length; i++) {
+            if (BLOCKS[i].id === data.id) { BLOCKS[i].status = data.status; break; }
+          }
+        }
+      });
+    })
+    .catch(function(e) { console.log("blockStatus load err:", e); });
+}
+
 function updateBlockStatus(id, val) {
   for (var i = 0; i < BLOCKS.length; i++) { if (BLOCKS[i].id === id) { BLOCKS[i].status = val; break; } }
-  showToast("Status updated");
+  // Save to Firebase so status persists across sessions
+  if (FB_ENABLED && window._db) {
+    window._dbl.setDoc(
+      window._dbl.doc(window._db, "blockStatus", id),
+      {id:id, status:val, updatedBy:cu.name, updatedAt:new Date().toISOString()},
+      {merge:true}
+    ).then(function(){ showToast("&#10003; Status saved to cloud!"); })
+     .catch(function(e){ showToast("Status updated locally. Cloud save failed."); });
+  } else {
+    showToast("Status updated");
+  }
 }
 
 function editBlockNote(id) {
@@ -3388,7 +3421,7 @@ function addManGPONRow(data) {
     h += '<div class="fgrp"><label class="flbl">GP Name *</label><input class="finp' + ic + '" id="mgpon-name-' + i + '" value="' + gn + '" placeholder="Village GP name"></div>';
   }
   h += '<div class="fgrp"><label class="flbl">GP ID</label><input class="finp' + ic + '" value="' + gid + '" placeholder="GP-001"></div>';
-  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel" id="gpon-phase-' + i + '"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">Phase</label><select class="fsel" id="mgpon-phase-' + i + '"><option' + (ph==="PH-1"?" selected":"") + '>PH-1</option><option' + (ph==="PH-2"?" selected":"") + '>PH-2</option><option' + (ph==="PH-3"?" selected":"") + '>PH-3</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">Manual Lat, Long *</label><input class="finp' + (ll?" imp":"") + '" id="mgpon-ll-' + i + '" value="' + ll + '" placeholder="27.4215, 80.1234"></div></div>';
   h += '<div class="frow f3">';
   h += '<div class="fgrp"><label class="flbl">GPS Source *</label><select class="fsel"><option>Google Maps - field team ne bheja</option><option>DGPS device register</option><option>Excel shapefile se</option><option>Approx - nearest road se</option></select></div>';
@@ -3433,12 +3466,12 @@ function addManJCRow(data) {
   } else {
     h += '<div class="fgrp"><label class="flbl">JC Name *</label><input class="finp' + ic + '" id="mjc-name-' + i + '" value="' + jn + '" placeholder="SJC-14"></div>';
   }
-  h += '<div class="fgrp"><label class="flbl">JC Type</label><select class="fsel"><option' + (jt==="24F"?" selected":"") + '>24F</option><option' + (jt==="48F"?" selected":"") + '>48F</option><option' + (jt==="96F"?" selected":"") + '>96F</option><option' + (jt==="288F"?" selected":"") + '>288F</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">GIS Lat/Long (Excel se)</label><input class="finp' + ic + '" value="' + gl + '" placeholder="As per shapefile"></div>';
+  h += '<div class="fgrp"><label class="flbl">JC Type</label><select class="fsel" id="mjc-type-' + i + '"><option' + (jt==="24F"?" selected":"") + '>24F</option><option' + (jt==="48F"?" selected":"") + '>48F</option><option' + (jt==="96F"?" selected":"") + '>96F</option><option' + (jt==="288F"?" selected":"") + '>288F</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">GIS Lat/Long (Excel se)</label><input class="finp' + ic + '" id="mjc-gisl-' + i + '" value="' + gl + '" placeholder="As per shapefile"></div>';
   h += '<div class="fgrp"><label class="flbl">Actual Lat/Long (Manual Entry) *</label><input class="finp' + (al?" imp":"") + '" id="mjc-al-' + i + '" value="' + al + '" placeholder="Field register se"></div></div>';
   h += '<div class="frow f3">';
-  h += '<div class="fgrp"><label class="flbl">JC Condition</label><select class="fsel"><option' + (jcond==="Good"?" selected":"") + '>Good</option><option' + (jcond==="Damaged"?" selected":"") + '>Damaged</option><option>Missing</option></select></div>';
-  h += '<div class="fgrp"><label class="flbl">Chamber Condition</label><select class="fsel"><option>Good</option><option>Damaged</option><option>Flooded</option><option>Missing Cover</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">JC Condition</label><select class="fsel" id="mjc-cond-' + i + '"><option' + (jcond==="Good"?" selected":"") + '>Good</option><option' + (jcond==="Damaged"?" selected":"") + '>Damaged</option><option>Missing</option></select></div>';
+  h += '<div class="fgrp"><label class="flbl">Chamber Condition</label><select class="fsel" id="mjc-cham-' + i + '"><option>Good</option><option>Damaged</option><option>Flooded</option><option>Missing Cover</option></select></div>';
   h += '<div class="fgrp"><label class="flbl">GPS Source</label><select class="fsel"><option>Field register</option><option>Google Maps</option><option>Shapefile approx</option><option>WhatsApp se field ne bheja</option></select></div></div>';
   h += '<div class="ev-section"><div class="ev-title">Attach JC Evidence</div>';
   h += '<div class="ev-grid">' + buildOfficeEvSlot("mjc", i, "photos") + buildOfficeEvSlot("mjc", i, "videos") + '</div></div>';
@@ -3605,7 +3638,7 @@ function submitManual() {
     var mgCustEl   = document.getElementById("mgpon-cust-"+mg);
     var mgCustMEl  = document.getElementById("mgpon-custm-"+mg);
     var mgLLEl     = document.getElementById("mgpon-ll-"+mg);
-    var mgPhaseEl  = document.getElementById("mgpon-phase-"+mg);
+    var mgPhaseEl  = document.getElementById("mgpon-phase-"+mg) || document.getElementById("gpon-phase-"+mg);
     gponData.push({
       srNo: mg,
       gpName:     mgNameEl  ? (mgNameEl.tagName==="SELECT" ? mgNameEl.options[mgNameEl.selectedIndex].value : mgNameEl.value.trim()) : ("GP "+mg),
@@ -4193,6 +4226,7 @@ function updAttBadge() {
 var _origFbReady = window._fbReady;
 window._fbReady = function() {
   if (_origFbReady) _origFbReady();
+  setTimeout(loadBlockStatusFromFirebase, 500); // load block status first
   setTimeout(finLoad, 1500);
   setTimeout(loadDocs, 2000);
   setTimeout(loadFieldReports, 2500);
