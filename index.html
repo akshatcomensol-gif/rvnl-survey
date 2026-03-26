@@ -4307,26 +4307,31 @@ function rPay() {
 
   var payments = FIN.payments.filter(function(p){
     if (p.deleted) return false;
-    if (isFinance) return p.status === "approved";
-    return true;
+    if (p.type === "rvnl-invoice") return false; // exclude RVNL invoices
+    return true; // show all to everyone with access
   });
 
-  var pending = payments.filter(function(p){return p.status==="pending";});
+  var pending  = payments.filter(function(p){return p.status==="pending";});
   var approved = payments.filter(function(p){return p.status==="approved";});
-  var paid = payments.filter(function(p){return p.status==="paid";});
+  var paid     = payments.filter(function(p){return p.status==="paid";});
+  var rejected = payments.filter(function(p){return p.status==="rejected";});
   var paidTotal = paid.reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
+  var pendingTotal = pending.reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
+  var approvedTotal = approved.reduce(function(a,p){return a+parseFloat(p.amount||0);},0);
 
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
-  h += "<div class='ct'>Payments" + (isFinance?" — Approved Only (Your View)":"") + "</div>";
+  h += "<div><div class='ct'>Payments</div>";
+  if (isFinance) h += "<div style='font-size:11px;color:var(--muted)'>&#9432; Pending=awaiting Akshat approval | Approved=mark as paid</div>";
+  h += "</div>";
   if (canRequest) h += "<button class='btn btn-gold' data-modal='payment'>+ Payment Request</button>";
   h += "</div>";
 
   h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr'>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending.length + "</div><div class='sl'>Pending Approval</div></div>";
-  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + approved.length + "</div><div class='sl'>Approved</div></div>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending.length + "</div><div class='sl'>Pending (&#8377;" + fmtR(pendingTotal) + ")</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + approved.length + "</div><div class='sl'>Approved (&#8377;" + fmtR(approvedTotal) + ")</div></div>";
   h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + paid.length + "</div><div class='sl'>Paid</div></div>";
-  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtR(paidTotal) + "</div><div class='sl'>Total Paid</div></div>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>&#8377;" + fmtR(paidTotal) + "</div><div class='sl'>Total Paid</div></div>";
   h += "</div>";
 
   if (!payments.length) {
@@ -4348,12 +4353,21 @@ function rPay() {
       h += "<td>" + (p.billUrl?"<a href='" + p.billUrl + "' target='_blank' style='color:var(--blue);font-size:11px'>&#128196;</a>":"-") + "</td>";
       h += "<td><span style='color:" + statusClr + ";font-size:11px;font-weight:700'>" + (p.status||"").toUpperCase() + "</span></td>";
       h += "<td><div style='display:flex;gap:3px;flex-wrap:wrap'>";
-      if (p.status==="pending" && canApprove) {
-        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='approve-payment' data-fid='" + p._fid + "'>&#10003;</button>";
-        h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px' data-action='reject-payment' data-fid='" + p._fid + "'>&#10007;</button>";
+      if (p.status==="pending") {
+        if (canApprove) {
+          h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='approve-payment' data-fid='" + p._fid + "' title='Approve'>&#10003;</button>";
+          h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px' data-action='reject-payment' data-fid='" + p._fid + "' title='Reject'>&#10007;</button>";
+        } else if (isFinance) {
+          h += "<span style='font-size:10px;color:var(--gold)'>&#9201; Awaiting Akshat approval</span>";
+        }
       }
-      if (p.status==="approved" && (canApprove||isFinance)) {
-        h += "<button class='btn btn-blue' style='padding:3px 7px;font-size:11px' data-action='mark-paid' data-fid='" + p._fid + "'>Paid</button>";
+      if (p.status==="approved") {
+        if (isFinance || canApprove) {
+          h += "<button class='btn btn-blue' style='padding:3px 7px;font-size:11px' data-action='mark-paid' data-fid='" + p._fid + "'>&#10003; Mark Paid</button>";
+        }
+      }
+      if (p.status==="rejected") {
+        h += "<span style='font-size:10px;color:var(--red)'>&#10007; Rejected</span>";
       }
       h += "</div></td></tr>";
     });
