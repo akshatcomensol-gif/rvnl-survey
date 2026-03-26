@@ -708,6 +708,7 @@ function loadFromFirebase() {
     var loaded = [];
     snap.forEach(function(d){ loaded.push(Object.assign({_fid:d.id}, d.data())); });
     allSubs = loaded;
+    submissions = loaded; // FIX: sync so renderDash/renderReview always use live Firebase data
     updBadge();
     // Auto-refresh current view if on dashboard or review
     var curPage = document.querySelector(".navtab.active");
@@ -820,6 +821,34 @@ async function doLogin() {
   updBadge();
   cu.loginTime = Date.now();
   startSessionTimer();
+  // Restore punch state if user was punched in before
+  try {
+    var savedPunch = localStorage.getItem("comensol_punchin_" + cu.name);
+    if (savedPunch) {
+      var sp = JSON.parse(savedPunch);
+      var today2 = new Date().toISOString().split("T")[0];
+      if (sp.date === today2) {
+        // Same day - restore punch state
+        punchedIn = true;
+        punchStart = new Date(sp.punchInTs);
+        // Check if this record already exists in attendanceLog to avoid duplicate
+        var alreadyRestored = attendanceLog.some(function(r){ return r._fid === sp.fid && r.name === sp.name; });
+        if (!alreadyRestored) {
+          var restoredRec = {
+            _fid: sp.fid || ('RESTORE-' + Date.now()), name: sp.name, role: sp.role,
+            date: sp.date, punchIn: sp.punchIn,
+            punchInTs: sp.punchInTs, punchOut: null, duration: null,
+            _restored: true
+          };
+          attendanceLog.push(restoredRec);
+        }
+        showToast('Welcome back ' + sp.name + '! Punched in since ' + sp.punchIn + '. Click Attendance to punch out.');
+      } else {
+        // Different day - clear old punch
+        localStorage.removeItem("comensol_punchin_" + cu.name);
+      }
+    }
+  } catch(e) {}
   gp("dashboard");
 }
 
@@ -939,7 +968,19 @@ function gp(page) {
   else if (page === "reports") { el.innerHTML = renderReports(); }
   else if (page === "manual") { el.innerHTML = renderManual(); }
   else if (page === "gismap") { el.innerHTML = renderGISMap(); setTimeout(initGISMap, 200); }
-  else if (page === "finance") { try { el.innerHTML = renderFinance(); } catch(e) { el.innerHTML = "<div class=\"card\"><div class=\"be\">Finance Error: " + e.message + "</div></div>"; console.error("Finance error:", e); } }
+  else if (page === "finance") {
+    try {
+      el.innerHTML = renderFinance();
+      // Reload data fresh every time Finance tab opens
+      if (FB_ENABLED && window._db) {
+        finLoad(); // reload from Firebase
+        setTimeout(refreshFinTab, 2000); // re-render after data loads
+      }
+    } catch(e) {
+      el.innerHTML = "<div class=\"card\"><div class=\"be\">Finance Error: " + e.message + "</div></div>";
+      console.error("Finance error:", e);
+    }
+  }
   else if (page === "users")  { el.innerHTML = renderUsers(); }
 }
 
@@ -1227,6 +1268,23 @@ function renderImport() {
   h += '<div id="xt-jc" style="display:none;overflow-x:auto;max-height:260px;overflow-y:auto"></div>';
   h += '<div class="btns"><button class="btn btn-gold" onclick="confirmXL()">Save to Block & Open Entry Form</button>';
   h += '<button class="btn btn-ghost" onclick="document.getElementById(\'xl-preview\').style.display=\'none\'">Clear</button></div></div></div>';
+  // GIS File Upload section - for gis/head role only
+  if (["head","gis"].includes(cu.role)) {
+    h += '<div class="card" style="background:rgba(200,151,43,.04);border:1px solid rgba(200,151,43,.2)">';
+    h += '<div class="ct" style="font-size:14px">&#128281; GIS Shapefile / GeoJSON Upload</div>';
+    h += '<div class="bi">Block ka route shapefile ya GeoJSON upload karo. Sirf <strong>.zip</strong> (SHP files ka zip) ya <strong>.geojson</strong> format support hota hai. <span style="color:var(--red)">RAR format supported nahi hai</span> — pehle 7-Zip ya WinRAR se ZIP mein convert karo.</div>';
+    h += '<div class="frow">';
+    h += '<div class="fgrp"><label class="flbl">Shapefile / GeoJSON File *</label>';
+    h += '<div class="upbox" style="padding:14px"><input type="file" id="gis-import-file" accept=".zip,.geojson,.json" onchange="handleGISImport(this)" style="touch-action:manipulation">';
+    h += '<div style="font-size:13px;color:var(--muted);margin-top:6px">&#128194; .zip (SHP+DBF+PRJ zip karo) ya .geojson</div>';
+    h += '<div style="font-size:10px;color:var(--orange);margin-top:4px">&#9888; RAR file directly upload nahi hogi — pehle ZIP banao</div>';
+    h += '</div></div>';
+    h += '<div class="fgrp" style="align-self:center"><div id="gis-import-status" class="bw" style="margin:0">No file selected</div></div>';
+    h += '</div>';
+    h += '<div class="btns"><button class="btn btn-ghost" style="font-size:12px" onclick="gp('gismap')">&#127758; GIS Map pe dekho</button></div>';
+    h += '</div>';
+  }
+
   var ikeys = Object.keys(importedData);
   if (ikeys.length > 0) {
     h += '<div class="card"><div class="ct">Imported Blocks Ready for Entry</div>';
@@ -2297,11 +2355,12 @@ function renderAtt() {
   h += '<div class="gpsrow" style="justify-content:center;margin-bottom:6px"><div class="gpsdot"></div><span id="att-gps" style="font-size:12px;color:var(--muted)">Location not captured</span></div>';
   h += '<div id="att-loc" style="font-size:11px;color:var(--muted);margin-bottom:16px;min-height:16px"></div>';
   var attBtnHtml = punchedIn
-    ? '<button class="btn btn-red" style="font-size:18px;padding:14px 40px;border-radius:10px" onclick="punchOut()">PUNCH OUT</button>'
-    : '<button class="btn btn-green" style="font-size:18px;padding:14px 40px;border-radius:10px;letter-spacing:1px" onclick="punchIn()">PUNCH IN</button>';
-  h += '<div id="att-btn">' + attBtnHtml + '</div>';
-  var attStatMsg = punchedIn && punchStart ? "Punched in at " + punchStart.toLocaleTimeString("en-IN") : "";
-  h += '<div id="att-stat" style="margin-top:14px;font-size:13px;color:var(--muted)">' + attStatMsg + '</div></div>';
+    ? '<button class="btn btn-red" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;touch-action:manipulation;cursor:pointer" onclick="punchOut()">&#9209; PUNCH OUT</button>'
+    : '<button class="btn btn-green" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;letter-spacing:1px;touch-action:manipulation;cursor:pointer" onclick="punchIn()">&#9654; PUNCH IN</button>';
+  h += '<div id="att-btn" style="touch-action:manipulation">' + attBtnHtml + '</div>';
+  var attStatMsg = punchedIn && punchStart ? '&#128994; Active since ' + punchStart.toLocaleTimeString('en-IN') : '';
+  var restoredBanner = (punchedIn && punchStart) ? '<div style="margin-top:8px;background:rgba(26,107,60,.12);border:1px solid var(--ok);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--ok)">&#128257; Punch restored — click PUNCH OUT to complete your shift</div>' : '';
+  h += '<div id="att-stat" style="margin-top:14px;font-size:13px;color:var(--ok);font-weight:600">' + attStatMsg + '</div>' + restoredBanner + '</div>';
   h += '<div class="card" style="margin-top:20px"><div class="ct">Today\'s Attendance Log</div><div id="att-log">';
   h += attendanceLog.length === 0 ? '<div style="color:var(--muted);font-size:13px">No records yet.</div>' : buildAttLog();
   h += '</div></div></div>';
@@ -2392,14 +2451,23 @@ function punchIn() {
   // Save to Firebase fin_attendance
   if (FB_ENABLED && window._db) {
     window._dbl.addDoc(window._dbl.collection(window._db, "fin_attendance"), rec)
-      .then(function(r) { rec._fid = r.id; })
+      .then(function(r) {
+        rec._fid = r.id;
+        // Store in localStorage so state persists if browser closes
+        try {
+          localStorage.setItem("comensol_punchin_" + cu.name, JSON.stringify({
+            fid: r.id, punchIn: rec.punchIn, punchInTs: rec.punchInTs,
+            date: rec.date, name: cu.name, role: cu.role
+          }));
+        } catch(e) {}
+      })
       .catch(function(e) { console.log("punchIn save err:", e); });
   }
   var btn = document.getElementById("att-btn");
   var stat = document.getElementById("att-stat");
-  if (btn) btn.innerHTML = '<button class="btn btn-red" style="font-size:18px;padding:14px 40px;border-radius:10px" onclick="punchOut()">PUNCH OUT</button>';
-  if (stat) stat.textContent = "Punched in at " + punchStart.toLocaleTimeString("en-IN");
-  showToast("Punched in! Good luck, " + cu.name);
+  if (btn) btn.innerHTML = '<button class="btn btn-red" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;touch-action:manipulation;cursor:pointer" onclick="punchOut()">&#9209; PUNCH OUT</button>';
+  if (stat) { stat.style.color='var(--ok)'; stat.style.fontWeight='600'; stat.textContent = '&#128994; Active since ' + punchStart.toLocaleTimeString('en-IN'); }
+  showToast("Punched in!");
 }
 
 function punchOut() {
@@ -2409,35 +2477,32 @@ function punchOut() {
   var hrs = Math.floor(dur / 60), mins = dur % 60;
   var durStr = hrs > 0 ? hrs + "h " + mins + "m" : mins + " min";
   punchedIn = false;
+  var lastRec = null;
   for (var i = attendanceLog.length - 1; i >= 0; i--) {
     if (attendanceLog[i].name === cu.name && !attendanceLog[i].punchOut) {
       attendanceLog[i].punchOut = end.toLocaleTimeString("en-IN");
       attendanceLog[i].duration = durStr;
+      lastRec = attendanceLog[i];
       break;
     }
   }
   var btn = document.getElementById("att-btn");
   var stat = document.getElementById("att-stat");
-  if (btn) btn.innerHTML = '<button class="btn btn-green" style="font-size:18px;padding:14px 40px;border-radius:10px" onclick="punchIn()">PUNCH IN</button>';
-  if (stat) stat.textContent = "Total today: " + durStr;
-  showToast("Punched out. Duration: " + durStr);
+  if (btn) btn.innerHTML = '<button class="btn btn-green" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;letter-spacing:1px;touch-action:manipulation;cursor:pointer" onclick="punchIn()">&#9654; PUNCH IN</button>';
+  if (stat) { stat.style.color='var(--muted)'; stat.style.fontWeight='normal'; stat.textContent = 'Total today: ' + durStr; }
+  showToast("Punched out. " + durStr);
   var log = document.getElementById("att-log");
   if (log) log.innerHTML = buildAttLog();
-  // Update Firebase record
-  var lastRec = null;
-  for (var j = attendanceLog.length-1; j >= 0; j--) {
-    if (attendanceLog[j].name === cu.name && attendanceLog[j].punchOut) {
-      lastRec = attendanceLog[j]; break;
-    }
-  }
+  // Clear localStorage punch state
+  try { localStorage.removeItem("comensol_punchin_" + cu.name); } catch(e) {}
+  // Save to Firebase
   if (lastRec && lastRec._fid && FB_ENABLED && window._db) {
     window._dbl.setDoc(
       window._dbl.doc(window._db, "fin_attendance", lastRec._fid),
       { punchOut: lastRec.punchOut, duration: durStr, type: "punchout" },
       { merge: true }
-    ).catch(function(e){ console.log("punchOut update err:", e); });
+    ).catch(function(e){ console.log("punchOut update:", e); });
   } else if (FB_ENABLED && window._db) {
-    // Save as new complete record
     window._dbl.addDoc(window._dbl.collection(window._db, "fin_attendance"), {
       name: cu.name, role: cu.role,
       date: new Date().toISOString().split("T")[0],
@@ -2445,9 +2510,10 @@ function punchOut() {
       punchIn: punchStart ? punchStart.toLocaleTimeString("en-IN") : "-",
       punchOut: end.toLocaleTimeString("en-IN"),
       duration: durStr, type: "punchout"
-    }).catch(function(e){ console.log("punchOut save err:", e); });
+    }).catch(function(e){ console.log("punchOut save:", e); });
   }
 }
+
 
 // ====================================================
 // REPORTS & EXCEL EXPORT
@@ -3595,6 +3661,15 @@ function initGISMap() {
     attribution: '&copy; OpenStreetMap contributors', maxZoom: 18
   }).addTo(_gisMap);
   gisRefreshMap();
+  // Auto-load pending GeoJSON from Import tab if available
+  if (window._pendingGeoJSON) {
+    setTimeout(function() {
+      addGeoJSONToMap(window._pendingGeoJSON.data, window._pendingGeoJSON.name);
+      var shpStatus = document.getElementById('shp-status');
+      if (shpStatus) { shpStatus.className = 'bo'; shpStatus.textContent = 'Loaded: ' + window._pendingGeoJSON.name; }
+      window._pendingGeoJSON = null;
+    }, 400);
+  }
 }
 
 function gisRefreshMap() {
@@ -3705,6 +3780,61 @@ function parseLatLng(str) {
     if (!isNaN(lat) && !isNaN(lng) && lat > 20 && lat < 35 && lng > 68 && lng < 98) return {lat:lat, lng:lng};
   }
   return null;
+}
+
+// GIS Import from Import Tab (used by handleGISImport in renderImport)
+function handleGISImport(input) {
+  if (!input.files || !input.files[0]) return;
+  var file = input.files[0];
+  var statusEl = document.getElementById('gis-import-status');
+  var name = file.name.toLowerCase();
+
+  // RAR check
+  if (name.endsWith('.rar') || name.endsWith('.7z') || name.endsWith('.tar')) {
+    if (statusEl) { statusEl.className = 'be'; statusEl.textContent = name + ' — format supported nahi! Pehle 7-Zip ya WinRAR se .zip banao, phir upload karo.'; }
+    input.value = '';
+    return;
+  }
+
+  if (statusEl) { statusEl.className = 'bw'; statusEl.textContent = 'Loading: ' + file.name + '...'; }
+
+  var reader = new FileReader();
+
+  if (name.endsWith('.geojson') || name.endsWith('.json')) {
+    reader.onload = function(e) {
+      try {
+        var gj = JSON.parse(e.target.result);
+        if (statusEl) { statusEl.className = 'bo'; statusEl.textContent = 'GeoJSON loaded: ' + file.name + ' (' + (gj.features ? gj.features.length : 0) + ' features)'; }
+        // Store for GIS map use and navigate
+        window._pendingGeoJSON = {data: gj, name: file.name};
+        showToast('GeoJSON loaded! GIS Map tab pe jaake dekho.');
+        if (statusEl) { statusEl.innerHTML = statusEl.textContent + ' <button class="btn btn-gold" style="padding:3px 10px;font-size:11px;margin-left:8px" onclick="gp(\'gismap\')">View on Map</button>'; statusEl.className = 'bo'; }
+      } catch(err) {
+        if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'GeoJSON error: ' + err.message; }
+      }
+    };
+    reader.readAsText(file);
+  } else if (name.endsWith('.zip')) {
+    reader.onload = function(e) {
+      if (!window.shp) {
+        if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'shpjs library load nahi hua. Internet check karo aur page refresh karo.'; }
+        return;
+      }
+      window.shp(e.target.result).then(function(gj) {
+        var featCount = gj.features ? gj.features.length : (Array.isArray(gj) ? gj.reduce(function(a,g){return a+(g.features?g.features.length:0);},0) : 0);
+        if (statusEl) { statusEl.className = 'bo'; statusEl.textContent = 'Shapefile loaded: ' + file.name + ' (' + featCount + ' features)'; }
+        window._pendingGeoJSON = {data: gj, name: file.name};
+        showToast('Shapefile loaded! GIS Map tab pe jaake dekho.');
+        if (statusEl) { statusEl.innerHTML += ' <button class="btn btn-gold" style="padding:3px 10px;font-size:11px;margin-left:8px" onclick="gp(\'gismap\')">View on Map</button>'; }
+      }).catch(function(err) {
+        if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'ZIP error: ' + err.message + ' — ZIP mein .shp, .dbf, .prj teeno files honi chahiye.'; }
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'Format supported nahi: ' + file.name + ' — sirf .zip ya .geojson use karo.'; }
+    input.value = '';
+  }
 }
 
 function loadShapefile(input) {
