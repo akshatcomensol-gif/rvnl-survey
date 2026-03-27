@@ -2050,7 +2050,14 @@ function renderReview() {
   if (rvnl.length > 0)    h += '<div class="card"><div class="ct" style="color:#B8860B">&#128228; Sent to RVNL (' + rvnl.length + ')</div>' + subTable(rvnl, false, false) + '</div>';
   if (ieRev.length > 0)  h += '<div class="card"><div class="ct" style="color:#1565C0">&#128269; IE Review Pending (' + ieRev.length + ')</div>' + subTable(ieRev, false, false) + '</div>';
   if (ieDone.length > 0) h += '<div class="card"><div class="ct" style="color:var(--ok)">&#9733; IE Final Approved (' + ieDone.length + ')</div>' + subTable(ieDone, false, false) + '</div>';
-  if (submissions.length === 0) h += '<div class="card"><div style="color:var(--muted);text-align:center;padding:30px">No submissions yet.</div></div>';
+  if (submissions.length === 0) {
+    // Check if Firebase is still loading - show spinner not "no data"
+    if (FB_ENABLED && window._db) {
+      h += '<div class="card"><div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:24px;margin-bottom:8px">&#8635;</div>Loading from cloud...</div></div>';
+    } else {
+      h += '<div class="card"><div style="color:var(--muted);text-align:center;padding:30px">No submissions yet.</div></div>';
+    }
+  }
   return h;
 }
 
@@ -2377,9 +2384,13 @@ function loadBlockStatusFromFirebase() {
     .then(function(snap) {
       snap.forEach(function(d) {
         var data = d.data();
-        if (data.id && data.status) {
+        if (data.id) {
           for (var i = 0; i < BLOCKS.length; i++) {
-            if (BLOCKS[i].id === data.id) { BLOCKS[i].status = data.status; break; }
+            if (BLOCKS[i].id === data.id) {
+              if (data.status) BLOCKS[i].status = data.status;
+              if (data.notes !== undefined) BLOCKS[i].notes = data.notes;
+              break;
+            }
           }
         }
       });
@@ -2407,7 +2418,18 @@ function editBlockNote(id) {
   for (var i = 0; i < BLOCKS.length; i++) { if (BLOCKS[i].id === id) { bl = BLOCKS[i]; break; } }
   if (!bl) return;
   var note = prompt("Notes for " + bl.name + ":", bl.notes || "");
-  if (note !== null) { bl.notes = note; gp("blocks"); }
+  if (note !== null) {
+    bl.notes = note;
+    if (FB_ENABLED && window._db) {
+      window._dbl.setDoc(
+        window._dbl.doc(window._db, "blockStatus", id),
+        {id:id, notes:note, updatedBy:cu.name, updatedAt:new Date().toISOString()},
+        {merge:true}
+      ).then(function(){ showToast("&#10003; Note saved!"); })
+       .catch(function(e){ showToast("Note saved locally."); });
+    }
+    gp("blocks");
+  }
 }
 
 function openAddBlock() {
@@ -2452,7 +2474,7 @@ function saveNewBlock() {
 // ====================================================
 function renderAtt() {
   var isHead = cu.role === "head" || cu.role === "review";
-  var h = '<div style="display:grid;grid-template-columns:1fr' + (isHead ? " 1fr" : "") + ';gap:20px">';
+  var h = '<div style="display:grid;grid-template-columns:1fr' + (isHead ? " 1fr" : "") + ';gap:20px;max-width:600px' + (isHead ? ';max-width:100%' : '') + '">';
   h += '<div><div class="punch-box">';
   h += '<div class="ptime" id="att-clk">--:--:--</div>';
   h += '<div style="color:var(--muted);font-size:12px;margin:8px 0 16px">' + new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"}) + '</div>';
@@ -3952,7 +3974,10 @@ function handleGISImport(input) {
   } else if (name.endsWith('.zip')) {
     reader.onload = function(e) {
       if (!window.shp) {
-        if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'shpjs library load nahi hua. Internet check karo aur page refresh karo.'; }
+        if (statusEl) {
+          statusEl.className = 'be';
+          statusEl.innerHTML = 'shpjs library load nahi hua. <strong>Internet check karo</strong> aur page hard-refresh karo (Ctrl+Shift+R). Agar phir bhi fail ho to GeoJSON format use karo (QGIS se export karo).';
+        }
         return;
       }
       window.shp(e.target.result).then(function(gj) {
@@ -3960,9 +3985,15 @@ function handleGISImport(input) {
         if (statusEl) { statusEl.className = 'bo'; statusEl.textContent = 'Shapefile loaded: ' + file.name + ' (' + featCount + ' features)'; }
         window._pendingGeoJSON = {data: gj, name: file.name};
         showToast('Shapefile loaded! GIS Map tab pe jaake dekho.');
-        if (statusEl) { statusEl.innerHTML += ' <button class="btn btn-gold" style="padding:3px 10px;font-size:11px;margin-left:8px" onclick="gp(\'gismap\')">View on Map</button>'; }
+        if (statusEl) {
+          statusEl.innerHTML = '&#10003; Loaded: ' + file.name + ' (' + featCount + ' features) &nbsp;<button class="btn btn-gold" style="padding:3px 10px;font-size:11px" onclick="gp(&quot;gismap&quot;)">View on Map &#127758;</button>';
+          statusEl.className = 'bo';
+        }
       }).catch(function(err) {
-        if (statusEl) { statusEl.className = 'be'; statusEl.textContent = 'ZIP error: ' + err.message + ' — ZIP mein .shp, .dbf, .prj teeno files honi chahiye.'; }
+        if (statusEl) {
+          statusEl.className = 'be';
+          statusEl.textContent = 'ZIP error: ' + err.message + ' — Check: ZIP mein .shp + .dbf + .prj teeno files honi chahiye. Ek hi shapefile ka ZIP banao.';
+        }
       });
     };
     reader.readAsArrayBuffer(file);
@@ -5200,13 +5231,29 @@ function onExpCat() {
 }
 function onVendorBlockChange() {
   var bid = getV("fv-block");
-  var type = getV("fv-type");
   if (!bid) return;
-  var g = getGIS(bid);
-  var qty = type==="brown"?g.brownKm:type==="green"?g.greenKm:g.gp;
+  // Auto-filter survey type based on block — FAT/GON = green only
+  var typeEl = document.getElementById("fv-type");
+  if (typeEl) {
+    var g = getGIS(bid);
+    var brownOpt = typeEl.querySelector('option[value="brown"]');
+    if (brownOpt) {
+      if (g.brownKm === 0) {
+        brownOpt.disabled = true;
+        brownOpt.textContent = 'Brown Field (N/A for this block)';
+        if (typeEl.value === 'brown') typeEl.value = 'green';
+      } else {
+        brownOpt.disabled = false;
+        brownOpt.textContent = 'Brown Field';
+      }
+    }
+  }
+  var type = getV("fv-type");
+  var g2 = getGIS(bid);
+  var qty = type==="brown"?g2.brownKm:type==="green"?g2.greenKm:g2.gp;
   var unit = type==="gpon"?"GPs":"km";
   var el = document.getElementById("fv-gis-info");
-  if (el) el.textContent = "GIS: " + qty.toFixed(3) + " " + unit + " | GP Count: " + g.gp;
+  if (el) el.textContent = "GIS: " + qty.toFixed(3) + " " + unit + " | GP Count: " + g2.gp;
   calcVendorMax();
 }
 function calcVendorMax() {
@@ -5222,6 +5269,17 @@ function calcVendorMax() {
 }
 function onWorkBlockChange() {
   var bid = getV("fw-block");
+  if (!bid) return;
+  // Auto-filter survey type — FAT/GON = green only
+  var typeEl = document.getElementById("fw-type");
+  if (typeEl) {
+    var gCheck = getGIS(bid);
+    var brownOpt = typeEl.querySelector('option[value="brown"]');
+    if (brownOpt) {
+      if (gCheck.brownKm === 0) { brownOpt.disabled = true; brownOpt.textContent = 'Brown Field (N/A)'; if (typeEl.value === 'brown') typeEl.value = 'green'; }
+      else { brownOpt.disabled = false; brownOpt.textContent = 'Brown Field'; }
+    }
+  }
   var type = getV("fw-type");
   if (!bid) return;
   var g = getGIS(bid);
@@ -5247,8 +5305,18 @@ function calcWorkTotal() {
 }
 function onPayBlockChange() {
   var bid = getV("fp-block");
-  var type = getV("fp-type");
   if (!bid) return;
+  // Auto-filter survey type — FAT/GON = green only
+  var typeEl = document.getElementById("fp-type");
+  if (typeEl) {
+    var gCheck = getGIS(bid);
+    var brownOpt = typeEl.querySelector('option[value="brown"]');
+    if (brownOpt) {
+      if (gCheck.brownKm === 0) { brownOpt.disabled = true; brownOpt.textContent = 'Brown Field (N/A)'; if (typeEl.value === 'brown') typeEl.value = 'green'; }
+      else { brownOpt.disabled = false; brownOpt.textContent = 'Brown Field'; }
+    }
+  }
+  var type = getV("fp-type");
   var v = getVendorForBlock(bid, type);
   setV("fp-vendor", v?v.vendorName:"No vendor — assign first!");
   calcPayAmount();
