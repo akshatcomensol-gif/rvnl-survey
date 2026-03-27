@@ -2484,8 +2484,21 @@ function renderAtt() {
     ? '<button class="btn btn-red" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;touch-action:manipulation;cursor:pointer" onclick="punchOut()">&#9209; PUNCH OUT</button>'
     : '<button class="btn btn-green" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;letter-spacing:1px;touch-action:manipulation;cursor:pointer" onclick="punchIn()">&#9654; PUNCH IN</button>';
   h += '<div id="att-btn" style="touch-action:manipulation">' + attBtnHtml + '</div>';
-  var attStatMsg = punchedIn && punchStart ? '&#128994; Active since ' + punchStart.toLocaleTimeString('en-IN') : '';
-  var restoredBanner = (punchedIn && punchStart) ? '<div style="margin-top:8px;background:rgba(26,107,60,.12);border:1px solid var(--ok);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--ok)">&#128257; Punch restored — click PUNCH OUT to complete your shift</div>' : '';
+  var attStatMsg = '';
+  var restoredBanner = '';
+  if (punchedIn && punchStart) {
+    var elapsedNow = Math.floor((Date.now() - punchStart.getTime()) / 1000);
+    var ehrs = Math.floor(elapsedNow / 3600);
+    var emins = Math.floor((elapsedNow % 3600) / 60);
+    var esecs = elapsedNow % 60;
+    attStatMsg = '\u25CF Punched in since ' + punchStart.toLocaleTimeString('en-IN') + '  |  Active: ' + ehrs + 'h ' + String(emins).padStart(2,'0') + 'm ' + String(esecs).padStart(2,'0') + 's';
+    if (elapsedNow >= 28800) {
+      restoredBanner = '<div style="margin-top:8px;background:rgba(204,0,0,.12);border:1px solid var(--red);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--red)">&#9888; 8 hours complete! Please PUNCH OUT now.</div>';
+    } else {
+      restoredBanner = '<div style="margin-top:8px;background:rgba(26,107,60,.12);border:1px solid var(--ok);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--ok)">&#128257; Punch active — click PUNCH OUT when done</div>';
+    }
+    window._8hrAlertShown = elapsedNow >= 28800;
+  }
   h += '<div id="att-stat" style="margin-top:14px;font-size:13px;color:var(--ok);font-weight:600">' + attStatMsg + '</div>' + restoredBanner + '</div>';
   h += '<div class="card" style="margin-top:20px"><div class="ct">Today\'s Attendance Log</div><div id="att-log">';
   h += attendanceLog.length === 0 ? '<div style="color:var(--muted);font-size:13px">No records yet.</div>' : buildAttLog();
@@ -2542,11 +2555,38 @@ function buildAttLog() {
 }
 
 var _attClkInt = null;
+var _attPunchTimerInt = null; // live elapsed timer
 function initAtt() {
   if (_attClkInt) clearInterval(_attClkInt);
+  if (_attPunchTimerInt) clearInterval(_attPunchTimerInt);
+
+  // Clock
   _attClkInt = setInterval(function() {
     var el = document.getElementById("att-clk");
     if (el) el.textContent = new Date().toLocaleTimeString("en-IN");
+  }, 1000);
+
+  // Live punch timer — shows elapsed time and 8hr alert
+  _attPunchTimerInt = setInterval(function() {
+    if (!punchedIn || !punchStart) return;
+    var elapsed = Math.floor((Date.now() - punchStart.getTime()) / 1000);
+    var hrs = Math.floor(elapsed / 3600);
+    var mins = Math.floor((elapsed % 3600) / 60);
+    var secs = elapsed % 60;
+    var display = hrs + 'h ' + String(mins).padStart(2,'0') + 'm ' + String(secs).padStart(2,'0') + 's';
+    var statEl = document.getElementById("att-stat");
+    if (statEl) {
+      var color = elapsed >= 28800 ? 'var(--red)' : elapsed >= 25200 ? 'var(--orange)' : 'var(--ok)';
+      statEl.style.color = color;
+      statEl.textContent = '\u25CF Punched in since ' + punchStart.toLocaleTimeString('en-IN') + '  |  Active: ' + display;
+    }
+    // 8-hour prompt — once only
+    if (elapsed >= 28800 && !window._8hrAlertShown) {
+      window._8hrAlertShown = true;
+      var btn = document.getElementById('att-btn');
+      if (btn) btn.innerHTML += '<div style="margin-top:10px;background:rgba(204,0,0,.12);border:1px solid var(--red);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--red)">&#9888; 8 hours complete! Please punch out now.</div>';
+      showToast('8 hours complete! Punch out karo.');
+    }
   }, 1000);
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(function(p) {
@@ -2592,7 +2632,8 @@ function punchIn() {
   var btn = document.getElementById("att-btn");
   var stat = document.getElementById("att-stat");
   if (btn) btn.innerHTML = '<button class="btn btn-red" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;touch-action:manipulation;cursor:pointer" onclick="punchOut()">&#9209; PUNCH OUT</button>';
-  if (stat) { stat.style.color='var(--ok)'; stat.style.fontWeight='600'; stat.textContent = '&#128994; Active since ' + punchStart.toLocaleTimeString('en-IN'); }
+  if (stat) { stat.style.color='var(--ok)'; stat.style.fontWeight='600'; stat.textContent = '\u25CF Punched in since ' + punchStart.toLocaleTimeString('en-IN') + ' | Active: 0h 00m 00s'; }
+  window._8hrAlertShown = false;
   showToast("Punched in!");
 }
 
@@ -2615,7 +2656,9 @@ function punchOut() {
   var btn = document.getElementById("att-btn");
   var stat = document.getElementById("att-stat");
   if (btn) btn.innerHTML = '<button class="btn btn-green" style="font-size:18px;padding:16px 44px;border-radius:10px;min-width:200px;letter-spacing:1px;touch-action:manipulation;cursor:pointer" onclick="punchIn()">&#9654; PUNCH IN</button>';
-  if (stat) { stat.style.color='var(--muted)'; stat.style.fontWeight='normal'; stat.textContent = 'Total today: ' + durStr; }
+  if (stat) { stat.style.color='var(--muted)'; stat.style.fontWeight='normal'; stat.textContent = '&#10003; Punched out. Total: ' + durStr; }
+  window._8hrAlertShown = false;
+  if (window._attPunchTimerInt) { clearInterval(window._attPunchTimerInt); window._attPunchTimerInt = null; }
   showToast("Punched out. " + durStr);
   var log = document.getElementById("att-log");
   if (log) log.innerHTML = buildAttLog();
@@ -4509,14 +4552,23 @@ function rFund() {
 // ============================================================
 function rVendor() {
   var vendors = FIN.vendors.filter(function(v){return !v.deleted;});
-  var canEdit = cu.role === "head";
-  var canView = ["head","manager","finance"].indexOf(cu.role) >= 0;
+  var canAssign  = ["head","manager"].indexOf(cu.role) >= 0;
+  var canApprove = cu.role === "head";
+  var canEdit    = canAssign;
+  var canView    = ["head","manager","finance"].indexOf(cu.role) >= 0;
+  var pendingVendors = vendors.filter(function(v){return !v.active;});
 
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Vendor Master — Block wise</div>";
-  if (canEdit) h += "<button class='btn btn-gold' data-modal='vendor'>+ Assign Vendor</button>";
+  if (canAssign) h += "<button class='btn btn-gold' data-modal='vendor'>+ Assign Vendor</button>";
   h += "</div>";
+  if (pendingVendors.length > 0 && canApprove) {
+    h += "<div class='bw' style='margin-bottom:10px'>&#9888; <strong>" + pendingVendors.length + " vendor(s)</strong> pending your approval — check table below.</div>";
+  }
+  if (pendingVendors.length > 0 && cu.role === 'manager') {
+    h += "<div class='bi' style='margin-bottom:10px'>&#9203; <strong>" + pendingVendors.length + " vendor(s)</strong> submitted by you — awaiting Akshat's approval.</div>";
+  }
   h += "<div class='bi' style='font-size:11px'>Green/Brown KM auto-loaded from Excel. Vendor rate × GIS KM = expected payment. Overpayment auto-flagged.</div>";
 
   if (!vendors.length) {
@@ -4541,8 +4593,9 @@ function rVendor() {
       h += "<td style='font-weight:700;color:var(--blue)'>" + fmtR(maxPay) + "</td>";
       h += "<td><span style='color:" + statusClr + ";font-size:11px;font-weight:700'>" + (v.active?"Active":"Pending") + "</span></td>";
       h += "<td style='display:flex;gap:4px;flex-wrap:wrap'>";
-      if (canEdit && !v.active) h += "<button class='btn btn-green' style='padding:3px 8px;font-size:11px' data-action='approve-vendor' data-fid='" + v._fid + "'>Approve</button>";
-      if (canEdit) h += "<button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='vendors' data-fid='" + v._fid + "'>Del</button>";
+      if (canApprove && !v.active) h += "<button class='btn btn-green' style='padding:3px 8px;font-size:11px' data-action='approve-vendor' data-fid='" + v._fid + "' title='Approve this vendor'>&#10003; Approve</button>";
+      if (canApprove) h += "<button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='vendors' data-fid='" + v._fid + "'>Del</button>";
+      if (cu.role === 'manager' && !v.active) h += "<span style='font-size:10px;color:var(--gold);padding:2px 6px'>&#9203; Pending Akshat</span>";
       h += "</td></tr>";
     });
     h += "</tbody></table></div>";
@@ -4654,10 +4707,17 @@ function rPay() {
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div><div class='ct'>Payments</div>";
-  if (isFinance) h += "<div style='font-size:11px;color:var(--muted)'>&#9432; Pending=awaiting Akshat approval | Approved=mark as paid</div>";
   h += "</div>";
   if (canRequest) h += "<button class='btn btn-gold' data-modal='payment'>+ Payment Request</button>";
   h += "</div>";
+  // Role-specific guidance
+  if (cu.role === 'manager') {
+    h += "<div class='bi' style='font-size:11px'>&#9432; <strong>Your flow:</strong> Request → Akshat approves → Ankita marks paid. Track status below.</div>";
+  } else if (isFinance) {
+    h += "<div class='bi' style='font-size:11px'>&#9432; <strong>Ankita:</strong> Approved payments are yours to mark as PAID after transfer.</div>";
+  } else if (canApprove) {
+    h += "<div class='bw' style='font-size:11px'>&#9888; <strong>Pending approvals: " + pending.length + "</strong> — approve to release to Ankita for payment.</div>";
+  }
 
   h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr'>";
   h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + pending.length + "</div><div class='sl'>Pending (&#8377;" + fmtR(pendingTotal) + ")</div></div>";
@@ -5095,7 +5155,7 @@ function openFinModal(type, dataset) {
   var body = document.getElementById("fin-modal-body");
   var formMap = {
     "fund": ["Add Fund Received", buildFundForm],
-    "vendor": ["Assign Vendor", buildVendorForm],
+    "vendor": ["Assign / Edit Vendor", buildVendorForm],
     "work": ["Add Work Entry", buildWorkForm],
     "payment": ["Payment Request", buildPayForm],
     "expense": ["Add Expense", buildExpForm],
@@ -5252,8 +5312,33 @@ function onVendorBlockChange() {
   var g2 = getGIS(bid);
   var qty = type==="brown"?g2.brownKm:type==="green"?g2.greenKm:g2.gp;
   var unit = type==="gpon"?"GPs":"km";
-  var el = document.getElementById("fv-gis-info");
-  if (el) el.textContent = "GIS: " + qty.toFixed(3) + " " + unit + " | GP Count: " + g2.gp;
+  // Auto-fill existing vendor for this block+type
+  var existing = FIN.vendors.find(function(v){ return v.blockId===bid && v.surveyType===type && !v.deleted; });
+  var infoEl = document.getElementById("fv-gis-info");
+  if (existing) {
+    // Pre-fill form with existing vendor data
+    setV("fv-name", existing.vendorName || "");
+    setV("fv-contact", existing.contact || "");
+    setV("fv-rate", existing.rate || "");
+    setV("fv-unit", existing.unit || "km");
+    setV("fv-remarks", existing.remarks || "");
+    // Store existing fid for update
+    var formEl = document.getElementById("fin-modal-body");
+    if (formEl) formEl.dataset.existingFid = existing._fid || "";
+    if (infoEl) infoEl.innerHTML = "GIS: " + qty.toFixed(3) + " " + unit + " | GP: " + g2.gp +
+      " &nbsp;<span style='background:rgba(26,107,60,.15);color:var(--ok);padding:2px 8px;border-radius:4px;font-size:11px'>&#10003; Existing vendor: <strong>" + existing.vendorName + "</strong> @ Rs " + existing.rate + "/" + existing.unit + " — editing will update</span>";
+    if (infoEl) infoEl.className = 'bo';
+  } else {
+    var nameEl = document.getElementById("fv-name");
+    var contactEl = document.getElementById("fv-contact");
+    var rateEl = document.getElementById("fv-rate");
+    if (nameEl) nameEl.value = "";
+    if (contactEl) contactEl.value = "";
+    if (rateEl) rateEl.value = "";
+    var formEl2 = document.getElementById("fin-modal-body");
+    if (formEl2) formEl2.dataset.existingFid = "";
+    if (infoEl) { infoEl.textContent = "GIS: " + qty.toFixed(3) + " " + unit + " | GP Count: " + g2.gp + " — No vendor assigned yet"; infoEl.className = 'bw'; }
+  }
   calcVendorMax();
 }
 function calcVendorMax() {
@@ -5347,9 +5432,31 @@ function saveFund() {
   FIN.funds.push(obj); finSave("funds", obj); closeFinModal(); showToast("Fund saved!"); refreshFinTab();
 }
 function saveVendor() {
-  var obj = {blockId:getV("fv-block"), surveyType:getV("fv-type"), vendorName:getV("fv-name").trim(), contact:getV("fv-contact"), rate:parseFloat(getV("fv-rate"))||0, unit:getV("fv-unit"), hasGst:getV("fv-gst")==="yes", gstPct:getV("fv-gstpct")||"18", remarks:getV("fv-remarks"), active:cu.role==="head", submittedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
+  var isHeadRole = cu.role === "head";
+  var obj = {blockId:getV("fv-block"), surveyType:getV("fv-type"), vendorName:getV("fv-name").trim(), contact:getV("fv-contact"), rate:parseFloat(getV("fv-rate"))||0, unit:getV("fv-unit"), hasGst:getV("fv-gst")==="yes", gstPct:getV("fv-gstpct")||"18", remarks:getV("fv-remarks"), active:isHeadRole, pendingApproval:!isHeadRole, submittedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.blockId||!obj.vendorName) { alert("Block and vendor name required!"); return; }
-  FIN.vendors.push(obj); finSave("vendors", obj); closeFinModal(); showToast("Vendor saved!"); refreshFinTab();
+  // Check if updating existing vendor (fid stored in modal body dataset)
+  var modalBody = document.getElementById("fin-modal-body");
+  var existingFid = modalBody ? (modalBody.dataset.existingFid || "") : "";
+  if (existingFid) {
+    // UPDATE existing vendor
+    var idx = FIN.vendors.findIndex(function(v){return v._fid===existingFid;});
+    if (idx >= 0) { Object.assign(FIN.vendors[idx], obj); obj._fid = existingFid; }
+    if (FB_ENABLED && window._db) {
+      window._dbl.setDoc(window._dbl.doc(window._db,"fin_vendors",existingFid), Object.assign({},obj,{savedAt:new Date().toISOString()}), {merge:true})
+        .then(function(){ showToast("&#10003; Vendor updated!"); })
+        .catch(function(e){ showToast("Error: "+e.message); });
+    }
+  } else {
+    // CREATE new vendor
+    FIN.vendors.push(obj); finSave("vendors", obj);
+    if (cu.role === 'manager') {
+      showToast("&#9203; Vendor submitted — Akshat se approval baad active hoga.");
+    } else {
+      showToast("&#10003; Vendor saved & active!");
+    }
+  }
+  closeFinModal(); refreshFinTab();
 }
 function saveWork() {
   var obj = {date:getV("fw-date"), blockId:getV("fw-block"), surveyType:getV("fw-type"), vendorName:getV("fw-vendor"), doneQty:parseFloat(getV("fw-done"))||0, remarks:getV("fw-remarks"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
@@ -5359,7 +5466,14 @@ function saveWork() {
 function savePayment() {
   var obj = {date:getV("fp-date"), blockId:getV("fp-block"), surveyType:getV("fp-type"), vendorName:getV("fp-vendor"), milestone:getV("fp-milestone"), amount:parseFloat(getV("fp-amount"))||0, workDone:getV("fp-workdone"), billUrl:getV("fp-bill"), status:"pending", requestedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.blockId||!obj.amount||!obj.workDone) { alert("Block, amount, and work details required!"); return; }
-  FIN.payments.push(obj); finSave("payments", obj); closeFinModal(); showToast("Payment request submitted!"); refreshFinTab();
+  FIN.payments.push(obj); finSave("payments", obj);
+  closeFinModal();
+  if (cu.role === 'manager') {
+    showToast("&#9203; Payment request submitted — Akshat approval pending.");
+  } else {
+    showToast("&#10003; Payment request submitted!");
+  }
+  refreshFinTab();
 }
 function saveExp() {
   var obj = {date:getV("fe-date"), category:getV("fe-cat"), description:getV("fe-desc").trim(), blockId:getV("fe-block"), amount:parseFloat(getV("fe-amount"))||0, frequency:getV("fe-freq"), hasGst:getV("fe-gst")==="yes", gstPct:getV("fe-gstpct")||"18", billUrl:getV("fe-bill"), itemName:getV("fe-item"), qty:getV("fe-qty"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
