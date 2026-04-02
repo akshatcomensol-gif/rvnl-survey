@@ -867,6 +867,33 @@ function startSessionTimer() {
       : String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
     var el = document.getElementById("session-timer");
     if (el) el.textContent = display;
+
+    // MIDNIGHT AUTO-PUNCH-OUT: if punch date != today, auto close
+    if (punchedIn && punchStart) {
+      var punchDate = punchStart.toISOString().split("T")[0];
+      var todayDate = new Date().toISOString().split("T")[0];
+      if (punchDate !== todayDate) {
+        // Different day — auto punch out at 11:59pm of punch day (9hr cap)
+        var autoEnd = new Date(punchStart.getTime() + 9*3600*1000);
+        var dur = Math.round((autoEnd - punchStart) / 60000);
+        var hrs = Math.floor(dur/60), mins = dur%60;
+        punchedIn = false;
+        for (var ii=attendanceLog.length-1;ii>=0;ii--) {
+          if (attendanceLog[ii].name===cu.name && !attendanceLog[ii].punchOut) {
+            attendanceLog[ii].punchOut = "Auto (midnight)";
+            attendanceLog[ii].duration = hrs+"h "+mins+"m (auto)";
+            if (FB_ENABLED && window._db && attendanceLog[ii]._fid) {
+              window._dbl.setDoc(window._dbl.doc(window._db,"fin_attendance",attendanceLog[ii]._fid),
+                {punchOut:"Auto (midnight)",duration:hrs+"h "+mins+"m (auto)",type:"auto-punchout"},{merge:true})
+                .catch(function(e){});
+            }
+            break;
+          }
+        }
+        try { localStorage.removeItem("comensol_punchin_"+cu.name); } catch(e) {}
+        showToast("&#9888; Auto punch-out: new day started. Please punch in again.");
+      }
+    }
   }, 1000);
 }
 
@@ -959,7 +986,7 @@ function gp(page) {
   }
   var el = document.getElementById("page");
   if (!el) return;
-  if (page === "dashboard")   { el.innerHTML = renderDash(); }
+  if (page === "dashboard")   { el.innerHTML = renderDash() + renderActionBanner(); }
   else if (page === "import") { el.innerHTML = renderImport(); }
   else if (page === "submit") { el.innerHTML = renderSubmit(); }
   else if (page === "review") { el.innerHTML = renderReview(); }
@@ -982,6 +1009,69 @@ function gp(page) {
     }
   }
   else if (page === "users")  { el.innerHTML = renderUsers(); }
+}
+
+
+// ====================================================
+// ACTION BANNER — pending items for logged-in user
+// ====================================================
+function renderActionBanner() {
+  if (!cu) return '';
+  var items = [];
+
+  // Payments pending approval (head)
+  if (cu.role === 'head') {
+    var pendingPay = FIN.payments.filter(function(p){return p.status==='pending'&&!p.deleted&&p.type!=='rvnl-invoice';}).length;
+    if (pendingPay > 0) items.push({color:'var(--red)',icon:'&#128197;',text:pendingPay+' payment request(s) awaiting your approval',action:"gp('finance');setTimeout(function(){swFinTab('fin-pay',null);},500);"});
+
+    var pendingVend = FIN.vendors.filter(function(v){return !v.active&&!v.deleted;}).length;
+    if (pendingVend > 0) items.push({color:'var(--orange)',icon:'&#128101;',text:pendingVend+' vendor(s) pending your approval',action:"gp('finance');setTimeout(function(){swFinTab('fin-vendor',null);},500);"});
+
+    var pendingTA = FIN.taLog.filter(function(t){return (t.status==='pending'||t.status==='checked')&&!t.deleted;}).length;
+    if (pendingTA > 0) items.push({color:'var(--gold)',icon:'&#128664;',text:pendingTA+' TA/DA entries awaiting approval',action:"gp('finance');setTimeout(function(){swFinTab('fin-ta',null);},500);"});
+
+    var pendingRev = submissions.filter(function(s){return s.wfStatus==='review';}).length;
+    if (pendingRev > 0) items.push({color:'#64B5F6',icon:'&#128269;',text:pendingRev+' submission(s) awaiting QC review',action:"gp('review');"});
+  }
+
+  // Finance actions for Ankita
+  if (cu.role === 'finance') {
+    var approvedPay = FIN.payments.filter(function(p){return p.status==='approved'&&!p.deleted;}).length;
+    if (approvedPay > 0) items.push({color:'var(--ok)',icon:'&#9989;',text:approvedPay+' approved payment(s) — mark as PAID',action:"gp('finance');setTimeout(function(){swFinTab('fin-pay',null);},500);"});
+
+    var approvedTA = FIN.taLog.filter(function(t){return t.status==='approved'&&!t.deleted;}).length;
+    if (approvedTA > 0) items.push({color:'var(--ok)',icon:'&#128664;',text:approvedTA+' TA/DA approved — mark as PAID',action:"gp('finance');setTimeout(function(){swFinTab('fin-ta',null);},500);"});
+  }
+
+  // Manager actions (Anuj)
+  if (cu.role === 'manager') {
+    var rejectedPay = FIN.payments.filter(function(p){return p.status==='rejected'&&!p.deleted&&p.requestedBy===cu.name;}).length;
+    if (rejectedPay > 0) items.push({color:'var(--red)',icon:'&#128197;',text:rejectedPay+' payment request(s) rejected — check details',action:"gp('finance');setTimeout(function(){swFinTab('fin-pay',null);},500);"});
+
+    var pendingCorr = submissions.filter(function(s){return s.wfStatus==='correction';}).length;
+    if (pendingCorr > 0) items.push({color:'var(--orange)',icon:'&#9888;',text:pendingCorr+' submission(s) returned for correction',action:"gp('review');"});
+  }
+
+  // Punch-in reminder
+  if (!punchedIn) {
+    var hour = new Date().getHours();
+    if (hour >= 7 && hour < 12) {
+      items.push({color:'var(--blue)',icon:'&#128100;',text:'You are not punched in today',action:"gp('attendance');"});
+    }
+  }
+
+  if (!items.length) return '';
+
+  var h = '<div style="margin-top:16px">';
+  items.forEach(function(item) {
+    h += '<div style="display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.03);border:1px solid var(--border);border-left:3px solid '+item.color+';border-radius:8px;padding:10px 14px;margin-bottom:8px;cursor:pointer" onclick="'+item.action+'">';
+    h += '<span style="font-size:16px">'+item.icon+'</span>';
+    h += '<span style="flex:1;font-size:13px">'+item.text+'</span>';
+    h += '<span style="font-size:11px;color:var(--muted)">Tap to view &#8594;</span>';
+    h += '</div>';
+  });
+  h += '</div>';
+  return h;
 }
 
 // ====================================================
@@ -2603,6 +2693,103 @@ function initAtt() {
 }
 
 function punchIn() {
+  // Capture geo-tagged photo first
+  captureAttendancePhoto(function(photoUrl, lat, lng) {
+    doPunchIn(photoUrl, lat, lng);
+  });
+}
+
+function captureAttendancePhoto(callback) {
+  // Create a temporary overlay for photo capture
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  overlay.innerHTML = '<div style="background:var(--card);border-radius:14px;padding:24px;width:100%;max-width:360px;text-align:center">' +
+    '<div style="font-family:Rajdhani,sans-serif;font-size:18px;color:var(--gold);margin-bottom:12px">&#128247; Attendance Photo Required</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:16px">GPS location + photo required for punch-in</div>' +
+    '<div id="att-cam-preview" style="width:100%;height:200px;background:#000;border-radius:8px;margin-bottom:12px;overflow:hidden;position:relative">' +
+    '<video id="att-video" autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video>' +
+    '<canvas id="att-canvas" style="display:none"></canvas>' +
+    '</div>' +
+    '<div id="att-gps-status" style="font-size:11px;color:var(--muted);margin-bottom:12px">&#128205; Getting location...</div>' +
+    '<div style="display:flex;gap:8px">' +
+    '<button id="att-snap-btn" style="flex:1;padding:12px;background:var(--gold);color:#0D1B2E;border:none;border-radius:8px;font-family:Rajdhani,sans-serif;font-size:16px;font-weight:700;cursor:pointer">&#128247; Take Photo</button>' +
+    '<button onclick="skipPhotoCapture()" style="padding:12px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:12px">Skip</button>' +
+    '</div></div>';
+  document.body.appendChild(overlay);
+  window._attOverlay = overlay;
+  window._attCallback = callback;
+  window._attLat = null;
+  window._attLng = null;
+
+  // Get GPS
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(p) {
+      window._attLat = p.coords.latitude.toFixed(6);
+      window._attLng = p.coords.longitude.toFixed(6);
+      var gs = document.getElementById('att-gps-status');
+      if (gs) { gs.style.color='var(--ok)'; gs.textContent = '&#128205; Location: '+window._attLat+', '+window._attLng; }
+    }, function() {
+      var gs = document.getElementById('att-gps-status');
+      if (gs) { gs.style.color='var(--orange)'; gs.textContent = '&#9888; GPS unavailable — proceeding without location'; }
+    });
+  }
+
+  // Start camera
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}, audio:false})
+      .then(function(stream) {
+        window._attStream = stream;
+        var vid = document.getElementById('att-video');
+        if (vid) { vid.srcObject = stream; }
+        var snapBtn = document.getElementById('att-snap-btn');
+        if (snapBtn) {
+          snapBtn.onclick = function() {
+            var vid2 = document.getElementById('att-video');
+            var canvas = document.getElementById('att-canvas');
+            if (!vid2 || !canvas) { skipPhotoCapture(); return; }
+            canvas.width = vid2.videoWidth || 320;
+            canvas.height = vid2.videoHeight || 240;
+            canvas.getContext('2d').drawImage(vid2, 0, 0);
+            // Stop camera
+            if (window._attStream) { window._attStream.getTracks().forEach(function(t){t.stop();}); }
+            canvas.toBlob(function(blob) {
+              if (!blob) { skipPhotoCapture(); return; }
+              // Upload to Firebase Storage
+              var fileName = 'attendance/'+cu.name.replace(/ /g,'_')+'_'+new Date().toISOString().replace(/[:.]/g,'-')+'.jpg';
+              if (FB_ENABLED && window._st && window._stl) {
+                var ref = window._stl.ref(window._st, fileName);
+                window._stl.uploadBytes(ref, blob).then(function(snap2) {
+                  return window._stl.getDownloadURL(snap2.ref);
+                }).then(function(url) {
+                  document.body.removeChild(window._attOverlay);
+                  window._attCallback(url, window._attLat, window._attLng);
+                }).catch(function() { skipPhotoCapture(); });
+              } else {
+                // No Firebase — use dataURL
+                var url2 = canvas.toDataURL('image/jpeg', 0.7);
+                document.body.removeChild(window._attOverlay);
+                window._attCallback(url2, window._attLat, window._attLng);
+              }
+            }, 'image/jpeg', 0.7);
+          };
+        }
+      })
+      .catch(function() {
+        // Camera not available — skip photo
+        skipPhotoCapture();
+      });
+  } else {
+    skipPhotoCapture();
+  }
+}
+
+function skipPhotoCapture() {
+  if (window._attStream) { window._attStream.getTracks().forEach(function(t){t.stop();}); }
+  if (window._attOverlay && window._attOverlay.parentNode) { document.body.removeChild(window._attOverlay); }
+  if (window._attCallback) window._attCallback(null, window._attLat, window._attLng);
+}
+
+function doPunchIn(photoUrl, lat, lng) {
   punchedIn = true; punchStart = new Date();
   var rec = {
     name: cu.name, role: cu.role,
@@ -2611,7 +2798,9 @@ function punchIn() {
     punchIn: punchStart.toLocaleTimeString("en-IN"),
     punchInTs: punchStart.toISOString(),
     punchOut: null, duration: null,
-    type: "punchin"
+    type: "punchin",
+    photoUrl: photoUrl || null,
+    lat: lat || null, lng: lng || null
   };
   attendanceLog.push(rec);
   // Save to Firebase fin_attendance
@@ -2976,6 +3165,8 @@ function renderUsers() {
         var u = members[j];
         h += '<div class="user-row"><span style="font-size:18px">&#128100;</span>';
         h += '<span style="flex:1;font-size:13px">' + u.name + '</span>';
+        h += '<span style="font-size:10px;color:var(--muted);margin-right:8px">' + (u.pwd||"role pwd") + '</span>';
+        h += '<button style="background:none;border:1px solid rgba(200,151,43,.4);color:var(--gold);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:4px" onclick="editUser(\'' + (u._fid||'') + '\',\'' + u.name + '\',\'' + role + '\')"  title="Edit">&#9998;</button>';
         h += '<button class="del-btn" onclick="removeUser(\'' + u.name + '\',\'' + role + '\')">&times;</button></div>';
       }
     }
@@ -4438,6 +4629,19 @@ function handleFinAction(action, fid, col, btn) {
     if (!km || isNaN(km)) return;
     var t5 = FIN.taLog.find(function(x){return x._fid===fid;});
     if (t5) { t5.km=parseFloat(km); t5.taAmount=parseFloat(km)*2.5; t5.amendedBy=cu.name; t5.status="checked"; finSave("taLog",t5); showToast("TA amended!"); refreshFinTab(); }
+  } else if (action === "ta-mark-paid") {
+    var t6 = FIN.taLog.find(function(x){return x._fid===fid;});
+    if (t6) {
+      t6.status="paid"; t6.paidBy=cu.name; t6.paidAt=today();
+      finSave("taLog",t6);
+      showToast("&#10003; TA/DA marked as PAID!");
+      refreshFinTab();
+    } else if (FB_ENABLED && window._db && fid) {
+      window._dbl.setDoc(window._dbl.doc(window._db,"fin_taLog",fid),
+        {status:"paid",paidBy:cu.name,paidAt:today(),savedAt:new Date().toISOString()},{merge:true})
+        .then(function(){showToast("&#10003; TA/DA marked PAID!"); finLoad();})
+        .catch(function(e){showToast("Error: "+e.message);});
+    }
   }
 }
 
@@ -4472,7 +4676,7 @@ function renderFinance() {
     {id:"fin-vendor", label:"&#128101; Vendors",      roles:["head","manager","finance"]},
     {id:"fin-work",   label:"&#128200; Work Progress",roles:["head","manager"]},
     {id:"fin-pay",    label:"&#128197; Payments",     roles:["head","manager","finance"]},
-    {id:"fin-exp",    label:"&#128179; Expenses",     roles:["head","finance"]},
+    {id:"fin-exp",    label:"&#128179; Expenses",     roles:["head","finance","manager"]},
     {id:"fin-ta",     label:"&#128664; TA / DA",      roles:["head","manager","supervisor","finance"]},
     {id:"fin-att",    label:"&#128100; Attendance",   roles:["head","manager"]},
     {id:"fin-report",      label:"&#128202; Reports",      roles:["head","finance"]},
@@ -4846,10 +5050,12 @@ function rTA() {
   h += "</div>";
   h += "<div class='bi' style='font-size:11px'>TA @ Rs 2.5/km (odometer auto-calc). DA = fixed daily allowance. Anuj checks → Akshat approves.</div>";
 
-  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr'>";
-  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + fmtR(approvedTA) + "</div><div class='sl'>TA Approved</div></div>";
-  h += "<div class='stat' style='--ac:var(--teal,var(--ok))'><div class='sv'>" + fmtR(approvedDA) + "</div><div class='sl'>DA Approved</div></div>";
-  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + entries.filter(function(t){return t.status==="pending";}).length + "</div><div class='sl'>Pending</div></div>";
+  var paidTA = entries.filter(function(t){return t.status==="paid";}).reduce(function(a,t){return a+parseFloat(t.taAmount||0)+parseFloat(t.daAmount||0);},0);
+  h += "<div class='stats' style='grid-template-columns:1fr 1fr 1fr 1fr'>";
+  h += "<div class='stat' style='--ac:var(--gold)'><div class='sv'>" + entries.filter(function(t){return t.status==="pending"||t.status==="checked";}).length + "</div><div class='sl'>Pending Approval</div></div>";
+  h += "<div class='stat' style='--ac:var(--blue)'><div class='sv'>" + fmtR(approvedTA+approvedDA) + "</div><div class='sl'>Approved — Pay Pending</div></div>";
+  h += "<div class='stat' style='--ac:var(--ok)'><div class='sv'>" + fmtR(paidTA) + "</div><div class='sl'>Paid</div></div>";
+  if (cu.role==="finance") h += "<div class='stat' style='--ac:var(--red)'><div class='sv'>" + entries.filter(function(t){return t.status==="approved";}).length + "</div><div class='sl'>Action Needed</div></div>";
   h += "</div>";
 
   if (!entries.length) {
@@ -4877,8 +5083,14 @@ function rTA() {
         h += "<button class='btn btn-ghost' style='padding:3px 7px;font-size:11px' data-action='ta-amend' data-fid='" + t._fid + "'>Amend</button>";
       }
       if ((t.status==="pending"||t.status==="checked") && cu.role==="head") {
-        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='ta-approve' data-fid='" + t._fid + "'>&#10003;</button>";
+        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px' data-action='ta-approve' data-fid='" + t._fid + "'>&#10003; Approve</button>";
         h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px' data-action='ta-reject' data-fid='" + t._fid + "'>&#10007;</button>";
+      }
+      if (t.status==="approved" && (cu.role==="finance" || cu.role==="head")) {
+        h += "<button class='btn btn-blue' style='padding:3px 7px;font-size:11px' data-action='ta-mark-paid' data-fid='" + t._fid + "'>&#10003; Mark Paid</button>";
+      }
+      if (t.status==="paid") {
+        h += "<span style='font-size:10px;color:var(--ok)'>&#10003; Paid by " + (t.paidBy||"") + "</span>";
       }
       h += "</div></td></tr>";
     });
@@ -6575,7 +6787,71 @@ function showIOSGuide() {
 }
 window.addEventListener('load', showIOSGuide);
 
-function loadUsersFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'users')).then(function(snap){snap.forEach(function(d){var data=d.data();if(data.deleted)return;var ex=USERS.find(function(u){return u.name===data.name&&u.role===data.role;});if(!ex&&data.name&&data.role){USERS.push({role:data.role,name:data.name,pwd:data.pwd||ROLE_PWDS[data.role]||'',_fid:d.id});}else if(ex){ex._fid=d.id;if(data.pwd)ex.pwd=data.pwd;}});}).catch(function(e){console.log('loadUsers:',e);});}
+function loadUsersFromFirebase(){
+  if(!FB_ENABLED||!window._db)return;
+  // Use onSnapshot for real-time user sync
+  window._dbl.onSnapshot(
+    window._dbl.collection(window._db,'users'),
+    function(snap){
+      snap.forEach(function(d){
+        var data=d.data();
+        if(data.deleted)return;
+        var ex=USERS.find(function(u){return u.name===data.name&&u.role===data.role;});
+        if(!ex&&data.name&&data.role){
+          USERS.push({role:data.role,name:data.name,pwd:data.pwd||ROLE_PWDS[data.role]||'',_fid:d.id});
+        } else if(ex){
+          ex._fid=d.id;
+          if(data.pwd)ex.pwd=data.pwd;
+          if(data.name)ex.name=data.name;
+          if(data.role)ex.role=data.role;
+        }
+      });
+      // Re-render users page if open
+      var curPage=document.querySelector(".navtab.active");
+      if(curPage&&(curPage.getAttribute("onclick")||"").includes("users")){
+        var el=document.getElementById("page");
+        if(el) el.innerHTML=renderUsers();
+      }
+    },
+    function(e){
+      console.log('loadUsers onSnapshot err:',e);
+      // Fallback to getDocs
+      window._dbl.getDocs(window._dbl.collection(window._db,'users')).then(function(snap){
+        snap.forEach(function(d){
+          var data=d.data();
+          if(data.deleted)return;
+          var ex=USERS.find(function(u){return u.name===data.name&&u.role===data.role;});
+          if(!ex&&data.name&&data.role){USERS.push({role:data.role,name:data.name,pwd:data.pwd||ROLE_PWDS[data.role]||'',_fid:d.id});}
+          else if(ex){ex._fid=d.id;if(data.pwd)ex.pwd=data.pwd;}
+        });
+      });
+    }
+  );
+}
+
+function editUser(fid, oldName, oldRole) {
+  var newName = prompt("Edit name:", oldName);
+  if (!newName || !newName.trim()) return;
+  newName = newName.trim();
+  var newPwd = prompt("New password (leave blank to keep current):", "");
+  for (var ii=0;ii<USERS.length;ii++){
+    if(USERS[ii]._fid===fid||( USERS[ii].name===oldName&&USERS[ii].role===oldRole)){
+      USERS[ii].name=newName;
+      if(newPwd&&newPwd.trim().length>=4) USERS[ii].pwd=newPwd.trim();
+      var updateObj={name:newName,role:oldRole};
+      if(newPwd&&newPwd.trim().length>=4) updateObj.pwd=newPwd.trim();
+      if(FB_ENABLED&&window._db&&fid){
+        window._dbl.setDoc(window._dbl.doc(window._db,'users',fid),updateObj,{merge:true})
+          .then(function(){showToast("&#10003; Updated!");gp("users");})
+          .catch(function(e){showToast("Error: "+e.message);});
+      } else {
+        showToast("Updated locally.");
+        gp("users");
+      }
+      break;
+    }
+  }
+}
 function loadRolePwdsFromFirebase(){if(!FB_ENABLED||!window._db)return;window._dbl.getDocs(window._dbl.collection(window._db,'settings')).then(function(snap){snap.forEach(function(d){if(d.id==='rolePwds'){var data=d.data();Object.keys(data).forEach(function(r){if(data[r]){ROLE_PWDS[r]=data[r];USERS.forEach(function(u){if(u.role===r)u.pwd=data[r];});}});}});}).catch(function(e){console.log('loadRolePwds:',e);});}
 
 // Auto-refresh data when tab becomes visible again
