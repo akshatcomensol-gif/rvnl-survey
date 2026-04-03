@@ -282,6 +282,7 @@ h1,h2,h3{font-family:"Rajdhani",sans-serif;}
         <div style="font-size:12px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" id="t-name"></div>
       </div>
       <div style="font-size:11px;color:rgba(255,255,255,.55);background:rgba(255,255,255,.08);padding:3px 8px;border-radius:10px;font-family:monospace;flex-shrink:0" id="session-timer">00:00</div>
+      <button id="alert-badge" onclick="showAlerts()" title="Notifications" style="position:relative;background:rgba(200,151,43,.15);border:1px solid rgba(200,151,43,.4);color:var(--gold);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0">&#128276;</button>
       <button style="background:rgba(184,134,11,.15);border:1px solid rgba(184,134,11,.4);color:var(--gold);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0" onclick="openChangePwd()">&#128273;</button>
       <button style="background:rgba(220,53,69,.15);border:1px solid rgba(220,53,69,.4);color:#FF8080;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0" onclick="doLogout()">&#10006;</button>
     </div>
@@ -2057,10 +2058,17 @@ function submitForReview() {
   submissions.push(sub);
   updBadge();
   saveToFirebase(sub);
-  clearDraft(bid); // remove local draft on successful submit
-  window._evUrls = {}; // clear evidence state
-  gpsCoords = null; // clear GPS state
+  clearDraft(bid);
+  window._evUrls = {};
+  gpsCoords = null;
   ofcIdx = 0; gponIdx = 0; jcIdx = 0;
+  // Notify review team
+  sendSystemAlert('review_pending',
+    'New submission: ' + sub.blockName + ' (' + sub.district + ') by ' + cu.name,
+    'review');
+  sendSystemAlert('review_pending',
+    'New submission: ' + sub.blockName + ' (' + sub.district + ') by ' + cu.name,
+    'head');
   showToast("&#10003; Submitted for review!");
   gp("dashboard");
 }
@@ -4571,6 +4579,16 @@ function handleFinAction(action, fid, col, btn) {
     var arr = FIN[col];
     var obj = arr && arr.find(function(x){return x._fid===fid;});
     if (obj) { obj.deleted = true; finSave(col, obj); showToast("Deleted!"); refreshFinTab(); }
+  } else if (action === "approve-expense") {
+    if (cu.role !== 'head') return;
+    var exp = FIN.expenses.find(function(x){return x._fid===fid;});
+    if (exp) { exp.status='approved'; exp.approvedBy=cu.name; exp.approvedAt=today(); finSave('expenses',exp); showToast("&#10003; Expense approved!"); refreshFinTab(); }
+  } else if (action === "reject-expense") {
+    if (cu.role !== 'head') return;
+    var reason = prompt("Rejection reason:");
+    if (!reason) return;
+    var exp2 = FIN.expenses.find(function(x){return x._fid===fid;});
+    if (exp2) { exp2.status='rejected'; exp2.rejectionReason=reason; finSave('expenses',exp2); showToast("Expense rejected!"); refreshFinTab(); }
   } else if (action === "approve-vendor") {
     var v = FIN.vendors.find(function(x){return x._fid===fid;});
     if (v) { v.active=true; v.approvedBy=cu.name; v.approvedAt=today(); finSave("vendors",v); showToast("Vendor approved!"); refreshFinTab(); }
@@ -4997,7 +5015,7 @@ function rExp() {
   var h = "<div class='card'>";
   h += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>";
   h += "<div class='ct'>Expenses Tracker</div>";
-  if (cu.role === "head") h += "<button class='btn btn-gold' data-modal='expense'>+ Add Expense</button>";
+  if (cu.role === "head" || cu.role === "manager") h += "<button class='btn btn-gold' data-modal='expense'>+ Add Expense</button>";
   h += "</div>";
 
   h += "<div class='stats' style='margin-bottom:12px'>";
@@ -5018,9 +5036,18 @@ function rExp() {
       h += "<td>" + (e.description||"-") + "</td>";
       h += "<td style='font-size:11px'>" + (bl?bl.name:e.blockId||"General") + "</td>";
       h += "<td style='font-weight:700;color:var(--red)'>₹" + fmtN(e.amount) + "</td>";
-      h += "<td style='font-size:11px'>" + (e.hasGst?"GST "+e.gstPct+"%":"No GST") + "</td>";
+      var expStatusClr = e.status==='approved'?'var(--ok)':e.status==='rejected'?'var(--red)':'var(--gold)';
+      h += "<td><span style='color:"+expStatusClr+";font-size:11px;font-weight:700'>"+((e.status||'approved').toUpperCase())+"</span></td>";
       h += "<td>" + (e.billUrl?"<a href='" + e.billUrl + "' target='_blank' style='color:var(--blue);font-size:11px'>&#128196;</a>":"-") + "</td>";
-      h += "<td><button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='expenses' data-fid='" + e._fid + "'>Del</button></td></tr>";
+      h += "<td style='white-space:nowrap'>";
+      if (e.status === 'pending' && cu.role === 'head') {
+        h += "<button class='btn btn-green' style='padding:3px 7px;font-size:11px;margin-right:3px' data-action='approve-expense' data-fid='" + e._fid + "'>&#10003;</button>";
+        h += "<button class='btn btn-red' style='padding:3px 7px;font-size:11px;margin-right:3px' data-action='reject-expense' data-fid='" + e._fid + "'>&#10007;</button>";
+      }
+      if (cu.role === 'head' || cu.role === 'finance') {
+        h += "<button class='btn btn-ghost' style='padding:3px 8px;font-size:11px;color:var(--red)' data-action='del' data-col='expenses' data-fid='" + e._fid + "'>Del</button>";
+      }
+      h += "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -5435,17 +5462,36 @@ function buildPayForm() {
 }
 
 function buildExpForm() {
+  var isManager = cu && cu.role === 'manager';
   var blkOpts = "<option value=''>General (not block specific)</option>";
   BLOCKS.forEach(function(b){ blkOpts += "<option value='" + b.id + "'>" + b.district + " - " + b.name + "</option>"; });
-  return "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fe-date' value='" + today() + "' min='2025-08-01'></div><div class='fgrp'><label class='flbl'>Category *</label><select class='fsel' id='fe-cat' onchange='onExpCat()'><optgroup label='Staff'><option value='salary-staff'>Office Staff Salary</option><option value='salary-supervisor'>Supervisor Salary</option><option value='salary-splicer'>Splicer Salary</option></optgroup><optgroup label='Rent'><option value='office-rent'>Office Rent</option><option value='guesthouse'>Guest House Rent</option><option value='site-stay'>Site Stay</option></optgroup><optgroup label='Tools'><option value='tools-purchase'>Tools/Equipment Purchase</option><option value='tools-rent-monthly'>Equipment Rent (Monthly)</option><option value='tools-rent-daily'>Equipment Rent (Daily)</option><option value='tools-repair'>Repair &amp; Maintenance</option></optgroup><optgroup label='Labour'><option value='inhouse-daily'>In-house Labour (Daily)</option><option value='inhouse-per-pit'>Labour (Per Pit)</option><option value='inhouse-splicer'>Splicer Site Work</option></optgroup><optgroup label='Other'><option value='facilitation'>Facilitation Charges</option><option value='rfc'>RFC Preparation</option><option value='consumables'>Consumables</option><option value='misc'>Miscellaneous</option></optgroup></select></div></div>" +
-  "<div class='frow'><div class='fgrp'><label class='flbl'>Description *</label><input class='finp' id='fe-desc' placeholder='e.g. Anuj salary March 2026'></div><div class='fgrp'><label class='flbl'>Block/Site</label><select class='fsel' id='fe-block'>" + blkOpts + "</select></div></div>" +
-  "<div id='fe-tools-row' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>Item Name</label><input class='finp' id='fe-item' placeholder='e.g. OTDR Machine'></div><div class='fgrp'><label class='flbl'>Qty/Duration</label><input class='finp' id='fe-qty' placeholder='e.g. 1 unit / 30 days'></div></div></div>" +
-  "<div id='fe-labour-row' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>Workers</label><input class='finp' type='number' id='fe-workers' value='1' oninput='calcLabour()'></div><div class='fgrp'><label class='flbl'>Days/Pits</label><input class='finp' type='number' id='fe-units' oninput='calcLabour()'></div></div><div class='frow'><div class='fgrp'><label class='flbl'>Rate/Day or Pit</label><input class='finp' type='number' id='fe-urate' oninput='calcLabour()'></div><div class='fgrp'><label class='flbl'>Total (Auto)</label><input class='finp' id='fe-ltotal' readonly style='background:var(--bg2)'></div></div></div>" +
-  "<div class='frow'><div class='fgrp'><label class='flbl'>Amount (Rs) *</label><input class='finp' type='number' id='fe-amount' placeholder='0'></div><div class='fgrp'><label class='flbl'>Frequency</label><select class='fsel' id='fe-freq'><option value='one-time'>One-time</option><option value='monthly'>Monthly</option><option value='daily'>Daily</option><option value='per-pit'>Per Pit</option></select></div></div>" +
-  "<div class='frow'><div class='fgrp'><label class='flbl'>Bill (Google Drive Link)</label><input class='finp' id='fe-bill' placeholder='Paste Drive link of bill'></div><div class='fgrp'><label class='flbl'>GST?</label><select class='fsel' id='fe-gst' onchange='document.getElementById(\"fe-gstrow\").style.display=this.value===\"yes\"?\"block\":\"none\"'><option value='no'>No GST</option><option value='yes'>With GST</option></select></div></div>" +
-  "<div id='fe-gstrow' style='display:none'><div class='frow'><div class='fgrp'><label class='flbl'>GST %</label><select class='fsel' id='fe-gstpct'><option value='18'>18%</option><option value='12'>12%</option></select></div></div></div>" +
-  "<div class='btns'><button class='btn btn-gold' onclick='saveExp()'>Save Expense</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+
+  var staffRentTools =
+    "<optgroup label='Staff'><option value='salary-staff'>Office Staff Salary</option><option value='salary-supervisor'>Supervisor Salary</option><option value='salary-splicer'>Splicer Salary</option></optgroup>" +
+    "<optgroup label='Rent'><option value='office-rent'>Office Rent</option><option value='guesthouse'>Guest House Rent</option><option value='site-stay'>Site Stay</option></optgroup>" +
+    "<optgroup label='Tools'><option value='tools-purchase'>Tools/Equipment Purchase</option><option value='tools-rent-monthly'>Equipment Rent (Monthly)</option><option value='tools-rent-daily'>Equipment Rent (Daily)</option><option value='tools-repair'>Repair &amp; Maintenance</option></optgroup>";
+
+  var labourOther =
+    "<optgroup label='Labour'><option value='inhouse-daily'>In-house Labour (Daily)</option><option value='inhouse-per-pit'>Labour (Per Pit)</option><option value='inhouse-splicer'>Splicer Site Work</option></optgroup>" +
+    "<optgroup label='Other'><option value='facilitation'>Facilitation Charges</option><option value='rfc'>RFC Preparation</option><option value='consumables'>Consumables</option><option value='misc'>Miscellaneous</option></optgroup>";
+
+  var catOptions = (isManager ? "" : staffRentTools) + labourOther;
+  var h = isManager ? "<div class='bi' style='font-size:11px;margin-bottom:10px'>&#9203; Submitted to Akshat for approval.</div>" : "";
+  h += "<div class='frow'><div class='fgrp'><label class='flbl'>Date</label><input class='finp' type='date' id='fe-date' value='" + today() + "' min='2025-08-01'></div>";
+  h += "<div class='fgrp'><label class='flbl'>Category *</label><select class='fsel' id='fe-cat' onchange='onExpCat()'>" + catOptions + "</select></div></div>";
+  h += "<div class='frow'><div class='fgrp'><label class='flbl'>Block / Site</label><select class='fsel' id='fe-block'>" + blkOpts + "</select></div>";
+  h += "<div class='fgrp'><label class='flbl'>Amount (Rs) *</label><input class='finp' type='number' id='fe-amount' placeholder='0'></div></div>";
+  h += "<div id='fe-labour-row'><div class='frow'><div class='fgrp'><label class='flbl'>Person / Team</label><input class='finp' id='fe-item' placeholder='e.g. Raju + team'></div>";
+  h += "<div class='fgrp'><label class='flbl'>Qty (days/pits)</label><input class='finp' type='number' id='fe-qty' placeholder='5'></div></div></div>";
+  h += "<div class='frow f1'><div class='fgrp'><label class='flbl'>Description / Work Done *</label><input class='finp' id='fe-desc' placeholder='e.g. Pit digging HAR-03, 10 pits @ Rs 200'></div></div>";
+  h += "<div class='frow'><div class='fgrp'><label class='flbl'>Frequency</label><select class='fsel' id='fe-freq'><option value='one-time'>One-time</option><option value='daily'>Daily</option><option value='per-pit'>Per Pit</option><option value='monthly'>Monthly</option></select></div>";
+  h += "<div class='fgrp'><label class='flbl'>Bill / Receipt (Drive link)</label><input class='finp' id='fe-bill' placeholder='Google Drive link'></div></div>";
+  h += "<div class='frow'><div class='fgrp'><label class='flbl'>GST?</label><select class='fsel' id='fe-gst' onchange='document.getElementById(&quot;fe-gstrow&quot;).style.display=this.value===&quot;yes&quot;?&quot;flex&quot;:&quot;none&quot;'><option value='no'>No GST</option><option value='yes'>With GST</option></select></div>";
+  h += "<div class='fgrp' id='fe-gstrow' style='display:none'><label class='flbl'>GST %</label><select class='fsel' id='fe-gstpct'><option value='18'>18%</option><option value='12'>12%</option><option value='5'>5%</option></select></div></div>";
+  h += "<div class='btns'><button class='btn btn-gold' onclick='saveExp()'>" + (isManager ? "Submit for Approval" : "Save Expense") + "</button><button class='btn btn-ghost' onclick='closeFinModal()'>Cancel</button></div>";
+  return h;
 }
+
 
 function buildTAForm() {
   var supOpts = "";
@@ -5641,7 +5687,11 @@ function calcPayAmount() {
 function saveFund() {
   var obj = {date:getV("ff-date"), amount:parseFloat(getV("ff-amount"))||0, source:getV("ff-source"), ref:getV("ff-ref"), remarks:getV("ff-remarks"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.amount) { alert("Amount required!"); return; }
-  FIN.funds.push(obj); finSave("funds", obj); closeFinModal(); showToast("Fund saved!"); refreshFinTab();
+  FIN.funds.push(obj); finSave("funds", obj);
+  sendSystemAlert('fund_added',
+    'Fund added: Rs ' + obj.amount + ' from ' + (obj.source || 'unknown') + ' (Ref: ' + (obj.ref || '-') + ')',
+    'head');
+  closeFinModal(); showToast("&#10003; Fund saved!"); refreshFinTab();
 }
 function saveVendor() {
   var isHeadRole = cu.role === "head";
@@ -5663,6 +5713,9 @@ function saveVendor() {
     // CREATE new vendor
     FIN.vendors.push(obj); finSave("vendors", obj);
     if (cu.role === 'manager') {
+      sendSystemAlert('vendor_pending',
+        'Vendor assignment pending approval: ' + (obj.vendorName||'') + ' for ' + (obj.blockId||'') + ' (' + (obj.surveyType||'') + ') by ' + cu.name,
+        'head');
       showToast("&#9203; Vendor submitted — Akshat se approval baad active hoga.");
     } else {
       showToast("&#10003; Vendor saved & active!");
@@ -5679,6 +5732,9 @@ function savePayment() {
   var obj = {date:getV("fp-date"), blockId:getV("fp-block"), surveyType:getV("fp-type"), vendorName:getV("fp-vendor"), milestone:getV("fp-milestone"), amount:parseFloat(getV("fp-amount"))||0, workDone:getV("fp-workdone"), billUrl:getV("fp-bill"), status:"pending", requestedBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.blockId||!obj.amount||!obj.workDone) { alert("Block, amount, and work details required!"); return; }
   FIN.payments.push(obj); finSave("payments", obj);
+  sendSystemAlert('payment_pending',
+    'Payment request: Rs ' + obj.amount + ' | ' + (obj.vendorName||'') + ' | ' + (obj.blockId||'') + ' by ' + cu.name,
+    'head');
   closeFinModal();
   if (cu.role === 'manager') {
     showToast("&#9203; Payment request submitted — Akshat approval pending.");
@@ -5690,7 +5746,17 @@ function savePayment() {
 function saveExp() {
   var obj = {date:getV("fe-date"), category:getV("fe-cat"), description:getV("fe-desc").trim(), blockId:getV("fe-block"), amount:parseFloat(getV("fe-amount"))||0, frequency:getV("fe-freq"), hasGst:getV("fe-gst")==="yes", gstPct:getV("fe-gstpct")||"18", billUrl:getV("fe-bill"), itemName:getV("fe-item"), qty:getV("fe-qty"), enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.description||!obj.amount) { alert("Description and amount required!"); return; }
-  FIN.expenses.push(obj); finSave("expenses", obj); closeFinModal(); showToast("Expense saved!"); refreshFinTab();
+  obj.status = (cu.role === 'head' || cu.role === 'finance') ? 'approved' : 'pending';
+  obj.submittedBy = cu.name;
+  FIN.expenses.push(obj); finSave("expenses", obj);
+  if (cu.role === 'manager' || cu.role === 'supervisor') {
+    sendSystemAlert('expense_pending',
+      'Expense request: Rs ' + obj.amount + ' — ' + obj.description + ' by ' + cu.name,
+      'head');
+    closeFinModal(); showToast("&#9203; Expense submitted — Akshat approval pending."); refreshFinTab();
+  } else {
+    closeFinModal(); showToast("&#10003; Expense saved!"); refreshFinTab();
+  }
 }
 function saveTA() {
   var s = parseFloat(getV("ft-start"))||0;
@@ -5699,7 +5765,14 @@ function saveTA() {
   var da = parseFloat(getV("ft-da"))||0;
   var obj = {date:getV("ft-date"), supervisorName:getV("ft-sup"), blockId:getV("ft-block"), startKm:s, endKm:e, km:km, taAmount:km*2.5, daAmount:da, remarks:getV("ft-remarks"), status:"pending", enteredBy:cu.name, ts:new Date().toLocaleString("en-IN")};
   if (!obj.supervisorName||km<=0) { alert("Supervisor and valid KM required!"); return; }
-  FIN.taLog.push(obj); finSave("taLog", obj); closeFinModal(); showToast("TA/DA submitted!"); refreshFinTab();
+  FIN.taLog.push(obj); finSave("taLog", obj);
+  sendSystemAlert('ta_pending',
+    'TA/DA request: Rs ' + (parseFloat(obj.taAmount||0)+parseFloat(obj.daAmount||0)).toFixed(0) + ' | ' + obj.supervisorName + ' | ' + (obj.km||0) + ' km on ' + obj.date,
+    'manager');
+  sendSystemAlert('ta_pending',
+    'TA/DA request: Rs ' + (parseFloat(obj.taAmount||0)+parseFloat(obj.daAmount||0)).toFixed(0) + ' | ' + obj.supervisorName + ' | ' + (obj.km||0) + ' km on ' + obj.date,
+    'head');
+  closeFinModal(); showToast("&#10003; TA/DA submitted!"); refreshFinTab();
 }
 function saveAttRates() {
   USERS.forEach(function(u) {
@@ -5965,12 +6038,44 @@ function loadAlerts() {
 }
 
 function updAlertBadge() {
-  var unread = _alerts.filter(function(a){ return !a.read; }).length;
+  if (!cu) return;
+  var myUnread = _alerts.filter(function(a) {
+    if (a.read) return false;
+    if (a.for && (a.for.indexOf(cu.role) >= 0 || a.for.indexOf(cu.name) >= 0 || a.for.indexOf('all') >= 0)) return true;
+    if (a.toRole && (a.toRole === cu.role || a.toRole === 'all')) return true;
+    return false;
+  }).length;
   var badge = document.getElementById("alert-badge");
   if (badge) {
-    badge.textContent = unread > 0 ? "🔔 " + unread : "🔔";
-    badge.style.color = unread > 0 ? "var(--gold)" : "";
-    badge.style.fontWeight = unread > 0 ? "700" : "";
+    if (myUnread > 0) {
+      badge.innerHTML = '&#128276; <span style="background:var(--red);color:#fff;border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;vertical-align:middle">' + myUnread + '</span>';
+      badge.style.borderColor = 'rgba(204,0,0,.6)';
+    } else {
+      badge.innerHTML = '&#128276;';
+      badge.style.borderColor = 'rgba(200,151,43,.4)';
+    }
+  }
+}
+
+// Central alert sender — role-based, persisted to Firebase
+function sendSystemAlert(type, message, toRole, toName) {
+  var alertObj = {
+    type: type,
+    title: message,
+    body: message,
+    by: cu ? cu.name : 'System',
+    byRole: cu ? cu.role : 'system',
+    'for': toRole ? [toRole] : ['head'],
+    toRole: toRole || 'head',
+    forName: toName || null,
+    ts: new Date().toISOString(),
+    read: false
+  };
+  _alerts.push(alertObj);
+  updAlertBadge();
+  if (FB_ENABLED && window._db) {
+    window._dbl.addDoc(window._dbl.collection(window._db, 'alerts'), alertObj)
+      .catch(function(e) { console.log('alert save:', e); });
   }
 }
 
@@ -5978,49 +6083,85 @@ function markAlertRead(id) {
   var a = _alerts.find(function(x){ return x.id === id; });
   if (a) {
     a.read = true;
-    if (FB_ENABLED && window._db) {
+    if (FB_ENABLED && window._db && id) {
       window._dbl.setDoc(window._dbl.doc(window._db, "alerts", id), {read: true}, {merge: true});
     }
     updAlertBadge();
   }
 }
 
+function markAllAlertsRead() {
+  _alerts.forEach(function(a) {
+    if (!a.read) {
+      a.read = true;
+      if (FB_ENABLED && window._db && a.id) {
+        window._dbl.setDoc(window._dbl.doc(window._db, "alerts", a.id), {read: true}, {merge: true});
+      }
+    }
+  });
+  updAlertBadge();
+  closeFinModal();
+  showToast("&#10003; All notifications cleared!");
+}
+
 function showAlerts() {
-  var unread = _alerts.filter(function(a){ return !a.read; });
-  if (!unread.length) { showToast("No new alerts"); return; }
+  if (!cu) return;
+  var myAlerts = _alerts.filter(function(a) {
+    if (a['for'] && (a['for'].indexOf(cu.role) >= 0 || a['for'].indexOf(cu.name) >= 0)) return true;
+    if (a.toRole && (a.toRole === cu.role || a.toRole === 'all')) return true;
+    return false;
+  });
+  var unread = myAlerts.filter(function(a) { return !a.read; });
 
   var modal = document.getElementById("fin-modal");
   var title = document.getElementById("fin-modal-title");
   var body = document.getElementById("fin-modal-body");
   if (!modal) return;
 
-  title.textContent = "🔔 Alerts (" + unread.length + " new)";
-  var h = "";
-  unread.forEach(function(a) {
-    var icon = a.type==="payment"?"💸":a.type==="approval"?"✅":a.type==="review"?"🔍":"ℹ️";
-    h += "<div class='card' style='margin-bottom:8px;padding:12px'>";
-    h += "<div style='display:flex;justify-content:space-between'>";
-    h += "<span>" + icon + " <strong>" + a.message + "</strong></span>";
-    h += "<button class='btn btn-ghost' style='font-size:11px;padding:2px 8px' data-alert-id='" + a.id + "'>✓ Read</button>";
-    h += "</div>";
-    h += "<div style='font-size:11px;color:var(--muted);margin-top:4px'>" + a.ts + " | From: " + (a.fromRole||"system") + "</div>";
-    h += "</div>";
+  if (!unread.length) {
+    title.textContent = "Notifications";
+    body.innerHTML = "<div class='bo'>All caught up! No pending notifications. &#10003;</div>" +
+      "<div class='btns'><button class='btn btn-ghost' onclick='closeFinModal()'>Close</button></div>";
+    modal.classList.add("open");
+    return;
+  }
+
+  title.textContent = "&#128276; " + unread.length + " Pending Notification" + (unread.length > 1 ? "s" : "");
+  var h = "<div style='margin-bottom:10px;text-align:right'><button class='btn btn-ghost' style='font-size:11px;padding:4px 10px' onclick='markAllAlertsRead()'>&#10003; Mark all read</button></div>";
+
+  var typeMap = {
+    payment_pending:  {color:"var(--gold)",   icon:"&#128197;", label:"Payment Request"},
+    payment_approved: {color:"var(--ok)",     icon:"&#9989;",   label:"Payment Approved"},
+    payment_paid:     {color:"var(--ok)",     icon:"&#128176;", label:"Payment Paid"},
+    payment_rejected: {color:"var(--red)",    icon:"&#10060;",  label:"Payment Rejected"},
+    expense_pending:  {color:"var(--orange)", icon:"&#128179;", label:"Expense Request"},
+    vendor_pending:   {color:"var(--orange)", icon:"&#128101;", label:"Vendor Pending"},
+    review_pending:   {color:"#64B5F6",       icon:"&#128269;", label:"Review Pending"},
+    ta_pending:       {color:"var(--gold)",   icon:"&#128664;", label:"TA/DA Pending"},
+    leave_request:    {color:"#CE93D8",       icon:"&#128197;", label:"Leave Request"},
+    submission:       {color:"#64B5F6",       icon:"&#128221;", label:"Field Submission"},
+    fund_added:       {color:"var(--ok)",     icon:"&#128184;", label:"Fund Added"}
+  };
+
+  unread.slice().reverse().forEach(function(a) {
+    var tm = typeMap[a.type] || {color:"var(--muted)", icon:"&#8505;", label:"Alert"};
+    var timeStr = a.ts ? new Date(a.ts).toLocaleString("en-IN", {dateStyle:"short", timeStyle:"short"}) : "";
+    h += "<div style='border:0.5px solid var(--border);border-left:3px solid " + tm.color + ";border-radius:8px;padding:10px 14px;margin-bottom:8px;cursor:pointer;background:var(--card)' onclick='markAlertRead(&quot;" + a.id + "&quot;);closeFinModal()'>";
+    h += "<div style='display:flex;justify-content:space-between;align-items:flex-start'>";
+    h += "<div style='display:flex;gap:8px;align-items:flex-start'>";
+    h += "<span style='font-size:16px;flex-shrink:0'>" + tm.icon + "</span>";
+    h += "<div><div style='font-size:13px;font-weight:500;color:var(--text)'>" + (a.title || a.body || "") + "</div>";
+    if (a.by) h += "<div style='font-size:11px;color:var(--muted);margin-top:2px'>By: " + a.by + " &nbsp;|&nbsp; " + timeStr + "</div>";
+    h += "</div></div>";
+    h += "<span style='font-size:10px;color:var(--muted);flex-shrink:0;margin-left:8px'>Tap to dismiss</span>";
+    h += "</div></div>";
   });
+
   h += "<div class='btns'><button class='btn btn-ghost' onclick='closeFinModal()'>Close</button></div>";
   body.innerHTML = h;
   modal.classList.add("open");
 }
 
-// Auto-trigger alerts on key actions
-var _origSavePaymentRequest = window.savePayment;
-
-
-// ============================================================
-// FEATURE 1: DOCUMENT VAULT
-// Firebase Storage mein permanent docs — LOA, bills, WCC etc.
-// ============================================================
-
-var _docs = [];
 
 function loadDocs() {
   if (!FB_ENABLED || !window._db) return;
